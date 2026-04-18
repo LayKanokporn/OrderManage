@@ -1,0 +1,2298 @@
+const LINE_CHANNEL_ACCESS_TOKEN = "Xulquf7u1tbLgexIT2UKS7B10DljypVEI7inLTVC0hn4Ne+Y/U+dOLHRc7l86No0+EtfHDeXEw03YcvZ+M2YDApLGt+TxBciysNu9irbPKcM8Kven0sfLvJxHFgiuMIPNpqna8xEMvoVh369O0ll+gdB04t89/1O/w1cDnyilFU=";
+
+const SHEET_NAME     = "Orders";
+const TIMEZONE       = "Asia/Bangkok";
+const SPREADSHEET_ID = "1H8zPjxsXzHyxU4EfEfz1DQ6pS2aeKHOfGtRgiqb6Cqo";
+
+const ADMIN_USER_IDS = [
+  "Uxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+];
+
+// ============================================================
+//  DATE / TIME UTILS — UNIFIED LOGIC (🔧 FIXED)
+// ============================================================
+
+function pad2(n) {
+  return String(n).padStart(2, "0");
+}
+
+function isIsoDateTimeString(str) {
+  return /^\d{4}-\d{2}-\d{2}T/.test(String(str || "").trim());
+}
+
+function parseSlashDateParts(str) {
+  var m = String(str || "").trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if (!m) return null;
+  var dd = parseInt(m[1], 10);
+  var mm = parseInt(m[2], 10);
+  var yy = parseInt(m[3], 10);
+  if (yy < 100) yy += 2000;
+  if (yy < 2400) yy += 543;
+  return { day: dd, month: mm, yearBE: yy };
+}
+
+function formatDateFromDateObject(dateObj) {
+  if (!(dateObj instanceof Date) || isNaN(dateObj.getTime())) return "";
+  var dd = Utilities.formatDate(dateObj, TIMEZONE, "dd");
+  var mm = Utilities.formatDate(dateObj, TIMEZONE, "MM");
+  var yyyy = parseInt(Utilities.formatDate(dateObj, TIMEZONE, "yyyy"), 10);
+  if (yyyy < 2400) yyyy += 543;
+  return dd + "/" + mm + "/" + yyyy;
+}
+
+/**
+ * แปลงค่า (Date object / string dd/MM/CE หรือ dd/MM/BE / ISO string) → "dd/MM/พ.ศ."
+ */
+function formatDateTH(value) {
+  if (value === null || value === undefined || value === "") return "";
+
+  if (value instanceof Date) return formatDateFromDateObject(value);
+
+  var str = String(value).trim();
+  if (!str) return "";
+
+  var slash = parseSlashDateParts(str);
+  if (slash) return pad2(slash.day) + "/" + pad2(slash.month) + "/" + slash.yearBE;
+
+  if (str.includes("GMT") || str.includes("UTC") || isIsoDateTimeString(str)) {
+    var iso = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (iso) {
+      var isoYear = parseInt(iso[1], 10);
+      if (isoYear >= 2400) {
+        return iso[3] + "/" + iso[2] + "/" + isoYear;
+      }
+    }
+    var parsedIso = new Date(str);
+    if (!isNaN(parsedIso.getTime())) return formatDateFromDateObject(parsedIso);
+    return "";
+  }
+
+  var parsed = new Date(str);
+  if (!isNaN(parsed.getTime())) return formatDateFromDateObject(parsed);
+
+  return str;
+}
+
+/**
+ * แปลงค่าเวลา (Date object / string / ISO string) → "H:mm"
+ */
+function formatTimeTH(value) {
+  if (value === null || value === undefined || value === "") return "";
+
+  if (value instanceof Date) {
+    if (isNaN(value.getTime())) return "";
+    var hm = Utilities.formatDate(value, TIMEZONE, "H:mm");
+    return hm === "0:00" ? "" : hm;
+  }
+
+  var str = String(value).trim();
+  if (!str) return "";
+
+  var timeParts = str.match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
+  if (timeParts) {
+    return parseInt(timeParts[1], 10) + ":" + timeParts[2];
+  }
+
+  if (str.includes("GMT") || str.includes("UTC") || isIsoDateTimeString(str)) {
+    var parsed = new Date(str);
+    if (!isNaN(parsed.getTime())) {
+      var hm2 = Utilities.formatDate(parsed, TIMEZONE, "H:mm");
+      return hm2 === "0:00" ? "" : hm2;
+    }
+    return "";
+  }
+
+  var parsed2 = new Date(str);
+  if (!isNaN(parsed2.getTime())) {
+    var hm3 = Utilities.formatDate(parsed2, TIMEZONE, "H:mm");
+    return hm3 === "0:00" ? "" : hm3;
+  }
+
+  return str;
+}
+
+function normalizeMonthInput(value) {
+  var cleaned = String(value || "").replace(/[\[\]]/g, "").trim();
+  var m = cleaned.match(/^(\d{1,2})\/(\d{2,4})$/);
+  if (!m) return cleaned;
+  var mm = pad2(m[1]);
+  var yyyy = parseInt(m[2], 10);
+  if (yyyy < 100) yyyy += 2000;
+  if (yyyy < 2400) yyyy += 543;
+  return mm + "/" + yyyy;
+}
+
+function getTodayTH() {
+  var now = new Date();
+  return formatDateTH(now);
+}
+
+function getTomorrowTH() {
+  var now = new Date();
+  now.setDate(now.getDate() + 1);
+  return formatDateTH(now);
+}
+
+function getTimestampTH() {
+  var now  = new Date();
+  var date = formatDateTH(now);
+  var h    = parseInt(Utilities.formatDate(now, TIMEZONE, "H"),  10);
+  var mm   = Utilities.formatDate(now, TIMEZONE, "mm");
+  var ss   = Utilities.formatDate(now, TIMEZONE, "ss");
+  return date + " " + h + ":" + mm + ":" + ss;
+}
+
+function thDateToDate(thDateStr) {
+  if (!thDateStr) return null;
+  var parts = String(thDateStr).trim().split("/");
+  if (parts.length !== 3) return null;
+  var y = parseInt(parts[2], 10);
+  if (y > 2500) y -= 543;
+  var m = parseInt(parts[1], 10) - 1;
+  var d = parseInt(parts[0], 10);
+  var result = new Date(y, m, d);
+  if (isNaN(result.getTime())) return null;
+  return result;
+}
+
+function addDaysTH(thDateStr, days) {
+  var d = thDateToDate(thDateStr);
+  if (!d) return "";
+  d.setDate(d.getDate() + days);
+  return formatDateTH(d);
+}
+
+function isDeliveryPassed(deliveryDateTH, deliveryTimeRaw) {
+  var d = thDateToDate(deliveryDateTH);
+  if (!d) return false;
+
+  var now     = new Date();
+  var today   = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  var delDay  = new Date(d.getFullYear(),   d.getMonth(),   d.getDate());
+
+  if (delDay < today) return true;
+  if (delDay > today) return false;
+
+  var timeStr = formatTimeTH(deliveryTimeRaw);
+  if (timeStr) {
+    var tp = timeStr.match(/^(\d{1,2}):(\d{2})/);
+    if (tp) {
+      var dH   = parseInt(tp[1], 10);
+      var dMin = parseInt(tp[2], 10);
+      var nowH = now.getHours();
+      var nowM = now.getMinutes();
+      if (dH < nowH || (dH === nowH && dMin <= nowM)) return true;
+    }
+  }
+  return false;
+}
+
+function deliveryDateSortKey(thDateStr) {
+  var d = thDateToDate(thDateStr);
+  return d ? d.getTime() : 0;
+}
+
+// ============================================================
+//  SHEET CACHE — 🔧 FIXED: ป้องกัน Date object หายจาก JSON
+// ============================================================
+function getSheetDataCached() {
+  var cache  = CacheService.getScriptCache();
+  var cached = cache.get("sheet_data");
+  if (cached) {
+    try { return JSON.parse(cached); } catch(e) {}
+  }
+  var data = getSheet().getDataRange().getValues();
+
+  // 🔧 FIX 1: แปลง Date objects เป็น string ก่อน cache
+  //    เพื่อให้ JSON.stringify/parse ได้ผลตรงกัน
+  var safeData = data.map(function(row) {
+    return row.map(function(cell) {
+      if (cell instanceof Date) {
+        // เก็บเป็น ISO string ที่ formatDateTH/formatTimeTH รองรับแล้ว
+        return cell.toISOString();
+      }
+      return cell;
+    });
+  });
+
+  try { cache.put("sheet_data", JSON.stringify(safeData), 60); } catch(e) {}
+  return safeData;
+}
+
+function clearSheetCache() {
+  CacheService.getScriptCache().remove("sheet_data");
+}
+
+// ============================================================
+//  QUICK REPLY SETS
+// ============================================================
+function qrAfterSave(orderId) {
+  return ["search order " + orderId, "search today", "summary 7", "summary"];
+}
+function qrAfterSearch(keyword) {
+  var base = ["search today", "summary", "summary 7", "help"];
+  if (keyword) base.unshift("search " + keyword);
+  return base.slice(0, 5);
+}
+var QR_MAIN      = ["summary", "summary 7", "search today", "search latest", "help"];
+var QR_SEARCH    = ["search today", "search latest", "summary", "summary 7", "help"];
+var QR_SUMMARY   = ["summary", "summary พรุ่งนี้", "summary 7", "summary month", "summary channel", "summary top menu"];
+var QR_HELP      = ["summary", "summary 7", "search today", "search latest", "clear log", "help"];
+var QR_NO_ORDERS = ["📋 คัดลอกฟอร์ม", "summary 7", "help"];
+
+// ============================================================
+//  GROUP STANDBY MODE
+// ============================================================
+var GROUP_STANDBY_MINUTES = 10;
+function getGroupStandbyKey(source) {
+  if (!source) return "";
+  if (source.type === "group") return "standby_group_" + source.groupId;
+  if (source.type === "room")  return "standby_room_"  + source.roomId;
+  return "";
+}
+function enableGroupStandby(source, minutes) {
+  var key = getGroupStandbyKey(source);
+  if (!key) return;
+  PropertiesService.getScriptProperties().setProperty(key, String(Date.now() + minutes * 60000));
+}
+function disableGroupStandby(source) {
+  var key = getGroupStandbyKey(source);
+  if (!key) return;
+  PropertiesService.getScriptProperties().deleteProperty(key);
+}
+function isGroupStandbyActive(source) {
+  var key = getGroupStandbyKey(source);
+  if (!key) return false;
+  var value = PropertiesService.getScriptProperties().getProperty(key);
+  if (!value) return false;
+  if (Date.now() > Number(value)) {
+    PropertiesService.getScriptProperties().deleteProperty(key);
+    return false;
+  }
+  return true;
+}
+function isWakeWordOnly(text)     { return String(text||"").trim().toLowerCase() === "ไก่จ๋า"; }
+function isStopWakeWord(text)     { var t = String(text||"").trim().toLowerCase(); return t==="ปิดไก่จ๋า"||t==="ไก่จ๋า stop"||t==="ไก่จ๋า off"; }
+function startsWithWakeWord(text) { return String(text||"").trim().toLowerCase().startsWith("ไก่จ๋า "); }
+function stripWakeWord(text)      { return String(text||"").replace(/^ไก่จ๋า\s*/i,"").trim(); }
+function shouldBotRespond(event) {
+  var source = event.source||{};
+  var st = source.type||"";
+  var text = event.message && event.message.text ? event.message.text.trim() : "";
+  if (st === "user") return true;
+  if (st === "group" || st === "room") {
+    if (isWakeWordOnly(text) || isStopWakeWord(text) || startsWithWakeWord(text)) return true;
+    if (isGroupStandbyActive(source)) return true;
+    return false;
+  }
+  return false;
+}
+
+// ============================================================
+//  ALIAS & FUZZY MATCH
+// ============================================================
+var COMMAND_ALIASES = {
+  "ออเดอร์วันนี้":"search today","ดูออเดอร์วันนี้":"search today","วันนี้":"search today",
+  "ล่าสุด":"search latest","ออเดอร์ล่าสุด":"search latest","ดูล่าสุด":"search latest",
+  "สรุปวันนี้":"summary","ดูสรุป":"summary","สรุป":"summary",
+  "สรุปพรุ่งนี้":"summary พรุ่งนี้","พรุ่งนี้":"summary พรุ่งนี้",
+  "สรุปเดือน":"summary month","สรุปช่องทาง":"summary channel",
+  "เมนูยอดนิยม":"summary top menu","ท็อปเมนู":"summary top menu",
+  "7วัน":"summary 7","สรุป7วัน":"summary 7","7 วัน":"summary 7",
+  "แผน7วัน":"summary 7","ล่วงหน้า":"summary 7",
+  "แผนการผลิต":"summary 7","production plan":"summary 7",
+  "คำสั่ง":"help","เมนู":"help","ช่วยด้วย":"help",
+  "ล้างล็อก":"clear log","ล้าง log":"clear log",
+  "srarch today":"search today","serach today":"search today",
+  "summry":"summary","sumarry":"summary","hlep":"help","hlp":"help",
+};
+
+function resolveAlias(text) {
+  var lower   = String(text||"").toLowerCase().trim();
+  var compact = lower.replace(/\s+/g,"");
+  if (COMMAND_ALIASES[lower]) return COMMAND_ALIASES[lower];
+  for (var alias in COMMAND_ALIASES) {
+    if (COMMAND_ALIASES.hasOwnProperty(alias)) {
+      if (alias.replace(/\s+/g,"") === compact) return COMMAND_ALIASES[alias];
+    }
+  }
+  if (/(ออเดอร์|order).*(วันนี้|today)/.test(lower))      return "search today";
+  if (/(ออเดอร์|order).*(ล่าสุด|latest)/.test(lower))    return "search latest";
+  if (/(สรุป|summary).*(พรุ่งนี้|tomorrow)/.test(lower)) return "summary พรุ่งนี้";
+  if (/(สรุป|summary).*(เดือน|month)/.test(lower))       return "summary month";
+  if (/(สรุป|summary).*(channel|ช่องทาง)/.test(lower))  return "summary channel";
+  if (/(top|ยอดนิยม|นิยม).*(เมนู|menu)/.test(lower))    return "summary top menu";
+  if (/(7\s*วัน|7\s*day|ล่วงหน้า|แผนผลิต|แผนการผลิต)/.test(lower)) return "summary 7";
+  if (/(คำสั่ง|help)/.test(lower) && !lower.startsWith("search") && !lower.startsWith("summary")) return "help";
+  return null;
+}
+
+// ============================================================
+//  DUPLICATE CHECK
+// ============================================================
+function isDuplicate(messageId) {
+  var props = PropertiesService.getScriptProperties(), key = "msg_" + messageId;
+  if (props.getProperty(key)) return true;
+  props.setProperty(key, getTodayTH());
+  return false;
+}
+
+// ============================================================
+//  PARSE ITEMS
+// ============================================================
+var UNIT_WORDS = "(ชิ้น|วง|กล่อง|ถุง|อัน|แผ่น|ลูก|ถาด|ห่อ|ปอนด์|ปอนด์ครึ่ง|กก|กิโล|kg|ปอนด์ใหญ่|ปอนด์เล็ก|เซท|set)";
+function normalizeItemLines(text) {
+  var lines  = String(text||"").split("\n").map(function(s){return s.trim();}).filter(Boolean);
+  var merged = [];
+  for (var i=0; i<lines.length; i++) {
+    var line = lines[i];
+    while (i+1 < lines.length &&
+      !/^(วันที่ส่ง|payment date|ลูกค้า\(ชื่อคนรับ\)|เบอร์|channel|order type|table\(ชื่อไลน์ลูกค้า\)|ประเภท|เวลาส่ง|สถานที่|ค่าส่ง|รวมทั้งหมด|note|รายการ|google\s*map)\s*:/i.test(lines[i+1]) &&
+      (new RegExp("^"+UNIT_WORDS+"\\s*=\\s*[\\d,]+\\s*฿?$","i").test(lines[i+1]) ||
+       /^=\s*[\d,]+\s*฿?$/i.test(lines[i+1]) || /^[\d,]+\s*฿?$/i.test(lines[i+1]))
+    ) { line += " " + lines[i+1]; i++; }
+    merged.push(line);
+  }
+  return merged;
+}
+var itemRegexWithUnit = new RegExp("^(?:\\d+\\.|[•\\-])\\s*(.+?)\\s+(\\d+)\\s*(" + UNIT_WORDS.replace(/[()]/g,"") + ")\\s*=\\s*([\\d,]+)\\s*฿?$","i");
+var itemRegexSimple   = /^(?:\d+\.|[•\-])\s*(.+?)\s+(\d+)\s*=\s*([\d,]+)\s*฿?$/i;
+var itemRegexInformal = /^(?:[•\-\d\.]+)\s*(.+?)\s*\|\s*Qty:\s*(\d+)\s*\|\s*Unit Price:\s*([\d,]+)/i;
+var itemRegexNoDash   = /^(.+?)\s+(\d+)\s*(?:ชิ้น|วง|กล่อง|ถุง|อัน|แผ่น|ลูก|ถาด|ห่อ|ปอนด์|กก|กิโล|kg|เซท|set)\s*=\s*([\d,]+)\s*฿?$/i;
+function parseItems(text) {
+  var lines = normalizeItemLines(text), items = [];
+  for (var li=0; li<lines.length; li++) {
+    var trimmed = lines[li].trim(); if (!trimmed) continue;
+    var m = trimmed.match(itemRegexWithUnit);
+    if (m) { var qty=toNumber(m[2]),total=toNumber(m[4]); items.push({menuName:m[1].trim(),unit:m[3].trim(),quantity:qty,unitPrice:qty>0?Math.round(total/qty):0,itemTotal:total}); continue; }
+    m = trimmed.match(itemRegexInformal);
+    if (m) { var qty2=toNumber(m[2]),up=toNumber(m[3]); items.push({menuName:m[1].trim(),unit:"ชิ้น",quantity:qty2,unitPrice:up,itemTotal:qty2*up}); continue; }
+    m = trimmed.match(itemRegexSimple);
+    if (m) { var qty3=toNumber(m[2]),total2=toNumber(m[3]); items.push({menuName:m[1].trim(),unit:"ชิ้น",quantity:qty3,unitPrice:qty3>0?Math.round(total2/qty3):0,itemTotal:total2}); continue; }
+    m = trimmed.match(itemRegexNoDash);
+    if (m) { var qty4=toNumber(m[2]),total3=toNumber(m[3]); items.push({menuName:m[1].trim(),unit:"ชิ้น",quantity:qty4,unitPrice:qty4>0?Math.round(total3/qty4):0,itemTotal:total3}); }
+  }
+  return items;
+}
+
+// ============================================================
+//  FLEX BUILDERS (ไม่เปลี่ยน — เหมือนเดิม)
+// ============================================================
+function buildOrderCardFlex(orderId, rows) {
+  var mainRow     = rows.find(function(r){ return r.grandTotal !== "" && r.grandTotal !== null && r.grandTotal !== undefined && toNumber(r.grandTotal) > 0; }) || rows[0];
+  var grandTotal  = toNumber(mainRow.grandTotal);
+  var deliveryFee = toNumber(mainRow.deliveryFee);
+  var foodTotal   = grandTotal - deliveryFee;
+
+  var deliveryDateStr = formatDateTH(mainRow.deliveryDate);
+  var deliveryTimeStr = formatTimeTH(mainRow.deliveryTime);
+  var passed          = isDeliveryPassed(deliveryDateStr, mainRow.deliveryTime);
+
+  var headerBg        = passed ? "#37474F" : "#FF6B6B";
+  var headerSubColor  = passed ? "#90A4AE"  : "#FFE0E0";
+  var headerDateColor = passed ? "#78909C"  : "#FFD0D0";
+  var statusBadge     = passed ? "✅ ส่งแล้ว" : "";
+
+  // 🔧 เช็ค status จริงจาก row ด้วย
+  if (mainRow.status === "Cancelled" || mainRow.status === "❌ ยกเลิก") {
+    headerBg = "#37474F";
+    statusBadge = "❌ ยกเลิก";
+  }
+
+  var itemRows = rows.map(function(r) {
+    var qty   = toNumber(r.qty);
+    var price = toNumber(r.unitPrice) * qty || toNumber(r.itemTotal);
+    var unit  = r.unit || (qty === 1 ? "วง" : "ชิ้น");
+    return {
+      type:"box", layout:"horizontal", margin:"sm",
+      contents:[
+        {type:"text",text:"• "+r.menuName,size:"sm",color:passed?"#9E9E9E":"#555555",flex:3,wrap:true},
+        {type:"text",text:qty+" "+unit,size:"sm",color:passed?"#BDBDBD":"#888888",flex:1,align:"center"},
+        {type:"text",text:price.toLocaleString()+"฿",size:"sm",color:passed?"#9E9E9E":"#333333",flex:2,align:"end",weight:"bold"}
+      ]
+    };
+  });
+
+  var infoRows = [];
+  if (mainRow.phone)        infoRows.push(makeInfoRow("📞 เบอร์",    String(mainRow.phone),    passed));
+  if (mainRow.channel)      infoRows.push(makeInfoRow("📡 Channel",  mainRow.channel,           passed));
+  if (mainRow.orderType)    infoRows.push(makeInfoRow("📋 ประเภท",  mainRow.orderType,          passed));
+  if (mainRow.deliveryType) infoRows.push(makeInfoRow("🚗 จัดส่ง",  mainRow.deliveryType,       passed));
+  if (deliveryTimeStr)      infoRows.push(makeInfoRow("⏰ เวลาส่ง", deliveryTimeStr,             passed));
+  if (mainRow.location)     infoRows.push(makeInfoRow("📍 สถานที่", String(mainRow.location),   passed));
+  if (mainRow.googleMap)    infoRows.push(makeInfoRow("🗺️ Map",     "ดูแผนที่",                 passed));
+  if (mainRow.note)         infoRows.push(makeInfoRow("📝 Note",     String(mainRow.note),       passed));
+
+  var bodyContents = [
+    {type:"box",layout:"horizontal",contents:[
+      {type:"text",text:"Order ID",size:"xs",color:"#AAAAAA",flex:2},
+      {type:"text",text:String(orderId),size:"xs",color:passed?"#9E9E9E":"#FF6B6B",flex:3,align:"end",weight:"bold"}
+    ]},
+    statusBadge ? {type:"text",text:statusBadge,size:"xs",color:statusBadge.includes("ยกเลิก")?"#F44336":"#4CAF50",align:"end",margin:"xs"} : null,
+    {type:"separator",margin:"sm"},
+    infoRows.length > 0 ? {type:"separator",margin:"sm"} : null
+  ].concat(infoRows).concat([
+    infoRows.length > 0 ? {type:"separator",margin:"sm"} : null,
+    {type:"box",layout:"horizontal",margin:"sm",contents:[
+      {type:"text",text:"รายการ",size:"xs",color:"#AAAAAA",flex:3,weight:"bold"},
+      {type:"text",text:"จำนวน",size:"xs",color:"#AAAAAA",flex:1,align:"center",weight:"bold"},
+      {type:"text",text:"ราคา",size:"xs",color:"#AAAAAA",flex:2,align:"end",weight:"bold"}
+    ]}
+  ]).concat(itemRows).concat([
+    {type:"separator",margin:"md"},
+    deliveryFee > 0 ? {type:"box",layout:"horizontal",contents:[
+      {type:"text",text:"🍰 ค่าอาหาร",size:"sm",color:"#888888",flex:3},
+      {type:"text",text:foodTotal.toLocaleString()+"฿",size:"sm",color:"#888888",flex:2,align:"end"}
+    ]} : null,
+    deliveryFee > 0 ? {type:"box",layout:"horizontal",contents:[
+      {type:"text",text:"🚚 ค่าส่ง",size:"sm",color:"#888888",flex:3},
+      {type:"text",text:deliveryFee.toLocaleString()+"฿",size:"sm",color:"#888888",flex:2,align:"end"}
+    ]} : null,
+    {type:"box",layout:"horizontal",margin:"sm",contents:[
+      {type:"text",text:"💰 รวมทั้งหมด",size:"md",color:passed?"#9E9E9E":"#333333",flex:3,weight:"bold"},
+      {type:"text",text:grandTotal.toLocaleString()+"฿",size:"md",color:passed?"#9E9E9E":"#FF6B6B",flex:2,align:"end",weight:"bold"}
+    ]}
+  ]).filter(Boolean);
+
+  var bubble = {
+    type:"bubble", size:"kilo",
+    header:{type:"box",layout:"vertical",backgroundColor:headerBg,paddingAll:"16px",contents:[
+      {type:"text",text:passed?"🧾 ออเดอร์ (ส่งแล้ว)":"🧾 ออเดอร์",size:"xs",color:headerSubColor,weight:"bold"},
+      {type:"text",text:"@"+mainRow.customerName,size:"lg",color:"#FFFFFF",weight:"bold",wrap:true},
+      {type:"text",text:"📅 "+deliveryDateStr+(deliveryTimeStr?"  ⏰ "+deliveryTimeStr:""),size:"xs",color:headerDateColor,margin:"sm"}
+    ]},
+    body:{type:"box",layout:"vertical",paddingAll:"16px",spacing:"md",contents:bodyContents}
+  };
+
+  if (mainRow.googleMap) {
+    bubble.footer = {
+      type:"box",layout:"horizontal",spacing:"sm",paddingAll:"12px",
+      contents:[{type:"button",action:{type:"uri",label:"🗺️ เปิดแผนที่",uri:mainRow.googleMap},style:"secondary",height:"sm"}]
+    };
+  }
+  return bubble;
+}
+
+function makeInfoRow(label, value, passed) {
+  return {
+    type:"box",layout:"horizontal",margin:"xs",
+    contents:[
+      {type:"text",text:label,size:"xs",color:passed?"#BDBDBD":"#888888",flex:2},
+      {type:"text",text:value,size:"xs",color:passed?"#9E9E9E":"#333333",flex:3,align:"end",wrap:true}
+    ]
+  };
+}
+
+// 🔧 FIX 4: helper function สำหรับเช็ค cancelled
+function isRowCancelled(r) {
+  var s = String(r.status || "").trim().toLowerCase();
+  return s === "cancelled" || s === "❌ ยกเลิก";
+}
+
+function buildOrderListFlex(rows, label) {
+  if (rows.length === 0) return {type:"flex",altText:"🔍 ไม่พบออเดอร์ "+label,contents:buildAlertFlex("🔍 ไม่พบออเดอร์",label,"#FF9500")};
+  var orders = groupRowsByOrder(rows);
+  orders.sort(function(a,b) {
+    var mA=a.rows[0], mB=b.rows[0];
+    var pA=isDeliveryPassed(formatDateTH(mA.deliveryDate), mA.deliveryTime)?1:0;
+    var pB=isDeliveryPassed(formatDateTH(mB.deliveryDate), mB.deliveryTime)?1:0;
+    if (pA !== pB) return pA - pB;
+    return deliveryDateSortKey(formatDateTH(mA.deliveryDate)) - deliveryDateSortKey(formatDateTH(mB.deliveryDate));
+  });
+  var limit = 12;
+  var bubbles = orders.slice(0,limit).map(function(o){ return buildOrderCardFlex(o.orderId, o.rows); });
+  if (orders.length > limit) bubbles.push({type:"bubble",size:"kilo",body:{type:"box",layout:"vertical",justifyContent:"center",alignItems:"center",height:"200px",contents:[
+    {type:"text",text:"+"+(orders.length-limit),size:"5xl",weight:"bold",color:"#CCCCCC"},
+    {type:"text",text:"ออเดอร์เพิ่มเติม",size:"sm",color:"#AAAAAA",margin:"md"}
+  ]}});
+  if (bubbles.length === 1) return {type:"flex",altText:"🔍 "+label,contents:bubbles[0]};
+  return {type:"flex",altText:"🔍 "+label+" ("+orders.length+" ออเดอร์)",contents:{type:"carousel",contents:bubbles}};
+}
+
+function buildSummaryDateFlex(targetDate, label) {
+  // 🔧 FIX 4: กรอง Cancelled ออกจาก summary
+  var rows = getOrderRows(function(r) {
+    return formatDateTH(r.deliveryDate) === targetDate && !isRowCancelled(r);
+  });
+  if (rows.length === 0) return {type:"flex",altText:"📊 ไม่มีออเดอร์"+label,contents:buildAlertFlex("📊 ไม่มีออเดอร์",label,"#AAAAAA")};
+  var orders = groupRowsByOrder(rows);
+  orders.sort(function(a,b) {
+    var pA=isDeliveryPassed(formatDateTH(a.rows[0].deliveryDate), a.rows[0].deliveryTime)?1:0;
+    var pB=isDeliveryPassed(formatDateTH(b.rows[0].deliveryDate), b.rows[0].deliveryTime)?1:0;
+    return pA-pB;
+  });
+  var grandTotalAll=0, totalQty=0;
+  var menuCount={}, channelCount={};
+  rows.forEach(function(r) {
+    if (r.grandTotal !== "" && r.grandTotal !== null && r.grandTotal !== undefined) grandTotalAll += toNumber(r.grandTotal);
+    totalQty += toNumber(r.qty);
+    if (r.menuName) menuCount[r.menuName] = (menuCount[r.menuName]||0) + toNumber(r.qty);
+    if (r.channel)  channelCount[r.channel] = (channelCount[r.channel]||0) + 1;
+  });
+  var summaryBubble = {
+    type:"bubble",size:"kilo",
+    header:{type:"box",layout:"vertical",backgroundColor:"#4CAF50",paddingAll:"16px",contents:[
+      {type:"text",text:"📊 สรุปยอด",size:"xs",color:"#C8E6C9",weight:"bold"},
+      {type:"text",text:label,size:"xl",color:"#FFFFFF",weight:"bold"},
+      {type:"text",text:targetDate,size:"xs",color:"#A5D6A7",margin:"xs"}
+    ]},
+    body:{type:"box",layout:"vertical",paddingAll:"16px",spacing:"md",contents:[
+      {type:"box",layout:"horizontal",spacing:"sm",contents:[
+        buildStatBox("🧾",String(orders.length),"ออเดอร์","#E8F5E9"),
+        buildStatBox("📦",String(totalQty),"ชิ้น","#E3F2FD"),
+        buildStatBox("💰",grandTotalAll>=1000?(grandTotalAll/1000).toFixed(1)+"K":String(grandTotalAll),"บาท","#FFF3E0")
+      ]},
+      {type:"separator"},
+      {type:"text",text:"🏭 สรุปการผลิต",size:"sm",weight:"bold",color:"#2E7D32"}
+    ].concat(Object.entries(menuCount).sort(function(a,b){return b[1]-a[1];}).map(function(e){return {type:"box",layout:"horizontal",contents:[{type:"text",text:"• "+e[0],size:"sm",color:"#555555",flex:4,wrap:true},{type:"text",text:e[1]+" ชิ้น",size:"sm",color:"#4CAF50",flex:2,align:"end",weight:"bold"}]};})).concat([
+      {type:"separator"},
+      {type:"text",text:"📡 Channel",size:"sm",weight:"bold",color:"#555555"}
+    ]).concat(Object.entries(channelCount).map(function(e){return {type:"box",layout:"horizontal",contents:[{type:"text",text:e[0],size:"sm",color:"#555555",flex:3},{type:"text",text:e[1]+" ออเดอร์",size:"sm",color:"#2196F3",flex:2,align:"end"}]};})).concat([
+      {type:"separator"},
+      {type:"box",layout:"horizontal",backgroundColor:"#F1F8E9",paddingAll:"10px",cornerRadius:"8px",contents:[
+        {type:"text",text:"💰 รวมทั้งสิ้น",size:"md",weight:"bold",color:"#388E3C",flex:3},
+        {type:"text",text:grandTotalAll.toLocaleString()+" บาท",size:"md",weight:"bold",color:"#4CAF50",flex:3,align:"end"}
+      ]}
+    ])
+    }
+  };
+  var orderBubbles = orders.slice(0,11).map(function(o){ return buildOrderCardFlex(o.orderId, o.rows); });
+  return {type:"flex",altText:"📊 สรุป"+label+" | "+orders.length+" ออเดอร์ | "+grandTotalAll.toLocaleString()+" บาท",contents:{type:"carousel",contents:[summaryBubble].concat(orderBubbles)}};
+}
+
+function buildSummary7DaysFlex() {
+  var today     = getTodayTH();
+  var dayLabels = ["วันนี้","พรุ่งนี้","มะรืน"];
+  var dayData   = [];
+  for (var i=0; i<7; i++) {
+    var targetDate = addDaysTH(today, i);
+    // 🔧 FIX 4: กรอง Cancelled ออก
+    var rows       = getOrderRows(function(r) {
+      return formatDateTH(r.deliveryDate) === targetDate && !isRowCancelled(r);
+    });
+    var orders     = groupRowsByOrder(rows);
+    var totalQty=0, grandTotalAll=0;
+    var menuQty={}, deliveries=[];
+    rows.forEach(function(r) { totalQty += toNumber(r.qty); if (r.menuName) menuQty[r.menuName]=(menuQty[r.menuName]||0)+toNumber(r.qty); });
+    orders.forEach(function(o) {
+      var main      = o.rows.find(function(r){return r.grandTotal!=="" && r.grandTotal!==null && r.grandTotal!==undefined && toNumber(r.grandTotal)>0;})||o.rows[0];
+      grandTotalAll  += toNumber(main.grandTotal);
+      var timeStr   = formatTimeTH(main.deliveryTime);
+      deliveries.push({
+        customer: main.customerName||"-",
+        location: main.location||main.deliveryType||"-",
+        time:     timeStr,
+        items:    o.rows.map(function(r){return r.menuName+" "+toNumber(r.qty)+" ชิ้น";}).join(", "),
+        total:    toNumber(main.grandTotal)
+      });
+    });
+    dayData.push({date:targetDate,label:dayLabels[i]||"+"+i+" วัน",orders:orders.length,totalQty:totalQty,grandTotal:grandTotalAll,menuQty:menuQty,deliveries:deliveries});
+  }
+  var totalOrders7 = dayData.reduce(function(s,d){return s+d.orders;},0);
+  var totalQty7    = dayData.reduce(function(s,d){return s+d.totalQty;},0);
+  var totalBaht7   = dayData.reduce(function(s,d){return s+d.grandTotal;},0);
+  var allMenuQty   = {};
+  dayData.forEach(function(d) { Object.entries(d.menuQty).forEach(function(e){ allMenuQty[e[0]]=(allMenuQty[e[0]]||0)+e[1]; }); });
+
+  var overviewBubble = {
+    type:"bubble",size:"kilo",
+    header:{type:"box",layout:"vertical",backgroundColor:"#1565C0",paddingAll:"16px",contents:[
+      {type:"text",text:"📅 แผนการผลิต 7 วัน",size:"xs",color:"#BBDEFB",weight:"bold"},
+      {type:"text",text:"ล่วงหน้า",size:"xxl",color:"#FFFFFF",weight:"bold"},
+      {type:"text",text:today+" เป็นต้นไป",size:"xs",color:"#90CAF9",margin:"xs"}
+    ]},
+    body:{type:"box",layout:"vertical",paddingAll:"16px",spacing:"md",contents:[
+      {type:"box",layout:"horizontal",spacing:"sm",contents:[
+        buildStatBox("🧾",String(totalOrders7),"ออเดอร์","#E3F2FD"),
+        buildStatBox("📦",String(totalQty7),"ชิ้น","#E8F5E9"),
+        buildStatBox("💰",totalBaht7>=1000?(totalBaht7/1000).toFixed(1)+"K":String(totalBaht7),"บาท","#FFF3E0")
+      ]},
+      {type:"separator"},
+      {type:"text",text:"🏭 ต้องผลิตรวม 7 วัน",size:"sm",weight:"bold",color:"#1565C0"}
+    ].concat(Object.entries(allMenuQty).sort(function(a,b){return b[1]-a[1];}).map(function(e){return {type:"box",layout:"horizontal",contents:[{type:"text",text:"• "+e[0],size:"sm",color:"#555555",flex:4,wrap:true},{type:"text",text:e[1]+" ชิ้น",size:"sm",color:"#1565C0",flex:2,align:"end",weight:"bold"}]};})).concat([
+      {type:"separator"},
+      {type:"text",text:"📅 แผนรายวัน",size:"sm",weight:"bold",color:"#555555"}
+    ]).concat(dayData.map(function(d) {
+      var hasOrder = d.orders > 0;
+      return {type:"box",layout:"horizontal",margin:"xs",backgroundColor:hasOrder?"#F3F8FF":"#FAFAFA",paddingAll:"8px",cornerRadius:"6px",
+        contents:[
+          {type:"box",layout:"vertical",flex:2,contents:[{type:"text",text:d.label,size:"xs",weight:"bold",color:hasOrder?"#1565C0":"#AAAAAA"},{type:"text",text:d.date,size:"xxs",color:"#AAAAAA"}]},
+          hasOrder?{type:"box",layout:"vertical",flex:3,contents:[{type:"text",text:d.orders+" ออเดอร์ / "+d.totalQty+" ชิ้น",size:"xs",color:"#333333"},{type:"text",text:d.grandTotal.toLocaleString()+" บาท",size:"xs",color:"#4CAF50",weight:"bold"}]}:{type:"text",text:"ว่าง",size:"xs",color:"#CCCCCC",flex:3}
+        ]
+      };
+    }))}
+  };
+
+  var bgColors  = ["#FF6B6B","#FF9500","#FFD700","#4CAF50","#2196F3","#9C27B0","#00BCD4"];
+  var dayBubbles = dayData.filter(function(d){return d.orders>0;}).map(function(d) {
+    var dayIdx    = dayData.indexOf(d), bg = bgColors[dayIdx%bgColors.length];
+    var menuRows  = Object.entries(d.menuQty).sort(function(a,b){return b[1]-a[1];}).map(function(e){return {type:"box",layout:"horizontal",contents:[{type:"text",text:"• "+e[0],size:"sm",color:"#555555",flex:4,wrap:true},{type:"text",text:e[1]+" ชิ้น",size:"sm",color:bg,flex:2,align:"end",weight:"bold"}]};});
+    var customerRows = d.deliveries.map(function(del){return {type:"box",layout:"vertical",margin:"sm",paddingAll:"8px",backgroundColor:"#F9F9F9",cornerRadius:"6px",contents:[
+      {type:"box",layout:"horizontal",contents:[{type:"text",text:"👤 "+del.customer,size:"sm",weight:"bold",color:"#333333",flex:3,wrap:true},del.time?{type:"text",text:"⏰ "+del.time,size:"xs",color:"#888888",flex:2,align:"end"}:{type:"filler"}]},
+      del.location&&del.location!=="-"?{type:"text",text:"📍 "+del.location,size:"xs",color:"#666666",margin:"xs",wrap:true}:null,
+      {type:"text",text:"🍰 "+del.items,size:"xs",color:"#555555",margin:"xs",wrap:true},
+      del.total>0?{type:"text",text:"💰 "+del.total.toLocaleString()+" บาท",size:"xs",color:"#4CAF50",margin:"xs",weight:"bold"}:null
+    ].filter(Boolean)};});
+    return {
+      type:"bubble",size:"kilo",
+      header:{type:"box",layout:"vertical",backgroundColor:bg,paddingAll:"16px",contents:[{type:"text",text:d.label,size:"xs",color:"rgba(255,255,255,0.8)",weight:"bold"},{type:"text",text:d.date,size:"xl",color:"#FFFFFF",weight:"bold"},{type:"text",text:d.orders+" ออเดอร์ / "+d.totalQty+" ชิ้น",size:"xs",color:"rgba(255,255,255,0.8)",margin:"xs"}]},
+      body:{type:"box",layout:"vertical",paddingAll:"16px",spacing:"sm",contents:[{type:"text",text:"🏭 ต้องผลิต",size:"sm",weight:"bold",color:"#333333"}].concat(menuRows).concat([{type:"separator",margin:"md"},{type:"text",text:"📦 รายชื่อส่ง",size:"sm",weight:"bold",color:"#333333",margin:"sm"}]).concat(customerRows).concat([{type:"separator",margin:"md"},{type:"box",layout:"horizontal",backgroundColor:"#F5F5F5",paddingAll:"10px",cornerRadius:"8px",contents:[{type:"text",text:"💰 ยอดรวมวัน",size:"sm",weight:"bold",color:"#333333",flex:3},{type:"text",text:d.grandTotal.toLocaleString()+" บาท",size:"sm",weight:"bold",color:bg,flex:3,align:"end"}]}])}
+    };
+  });
+
+  if (totalOrders7 === 0) return {type:"flex",altText:"📅 ไม่มีออเดอร์ใน 7 วันข้างหน้า",contents:buildAlertFlex("📅 ไม่มีออเดอร์","7 วันข้างหน้า","#AAAAAA")};
+  return {type:"flex",altText:"📅 แผนการผลิต 7 วัน | "+totalOrders7+" ออเดอร์ | "+totalQty7+" ชิ้น | "+totalBaht7.toLocaleString()+" บาท",contents:{type:"carousel",contents:[overviewBubble].concat(dayBubbles)}};
+}
+
+function buildSummaryMonthFlex(targetMonth) {
+  var cleaned = normalizeMonthInput(targetMonth);
+  var parts   = cleaned.split("/");
+  if (parts.length < 2) return {type:"flex",altText:"❌ รูปแบบเดือนไม่ถูกต้อง",contents:buildAlertFlex("❌ รูปแบบไม่ถูกต้อง","ใช้ MM/พ.ศ. เช่น 04/2569","#F44336")};
+  var mm   = parts[0].padStart(2,"0");
+  var yyyy = parts[1];
+  // 🔧 FIX 4: กรอง Cancelled + 🔧 FIX 3: null safety
+  var rows  = getOrderRows(function(r) {
+    var dp = formatDateTH(r.deliveryDate).split("/");
+    return dp.length === 3 && dp[1] === mm && dp[2] === yyyy && !isRowCancelled(r);
+  });
+  if (rows.length === 0) return {type:"flex",altText:"📊 ไม่มีออเดอร์เดือน "+cleaned,contents:buildAlertFlex("📊 ไม่มีออเดอร์","เดือน "+cleaned,"#AAAAAA")};
+  var orders = groupRowsByOrder(rows);
+  orders.sort(function(a,b) {
+    var pA=isDeliveryPassed(formatDateTH(a.rows[0].deliveryDate), a.rows[0].deliveryTime)?1:0;
+    var pB=isDeliveryPassed(formatDateTH(b.rows[0].deliveryDate), b.rows[0].deliveryTime)?1:0;
+    return pA-pB||deliveryDateSortKey(formatDateTH(a.rows[0].deliveryDate))-deliveryDateSortKey(formatDateTH(b.rows[0].deliveryDate));
+  });
+  var grandTotal=0, totalQty=0;
+  var menuQty={}, dateCount={};
+  rows.forEach(function(r) {
+    if (r.grandTotal !== "" && r.grandTotal !== null && r.grandTotal !== undefined) grandTotal += toNumber(r.grandTotal);
+    totalQty += toNumber(r.qty);
+    if (r.menuName) menuQty[r.menuName]=(menuQty[r.menuName]||0)+toNumber(r.qty);
+    var d=formatDateTH(r.deliveryDate); if (r.grandTotal!=="" && r.grandTotal!==null) dateCount[d]=(dateCount[d]||0)+1;
+  });
+  var activeDays = Object.keys(dateCount).length;
+  var avgPerDay  = activeDays>0?Math.round(grandTotal/activeDays):0;
+  var top5       = Object.entries(menuQty).sort(function(a,b){return b[1]-a[1];}).slice(0,5);
+  var summaryBubble = {
+    type:"bubble",size:"kilo",
+    header:{type:"box",layout:"vertical",backgroundColor:"#7C4DFF",paddingAll:"16px",contents:[{type:"text",text:"📊 สรุปเดือน",size:"xs",color:"#E8D5FF",weight:"bold"},{type:"text",text:cleaned,size:"xxl",color:"#FFFFFF",weight:"bold"}]},
+    body:{type:"box",layout:"vertical",paddingAll:"16px",spacing:"md",contents:[
+      {type:"box",layout:"horizontal",spacing:"sm",contents:[buildStatBox("🧾",String(orders.length),"ออเดอร์","#EDE7F6"),buildStatBox("📅",String(activeDays),"วัน","#E3F2FD"),buildStatBox("📦",String(totalQty),"ชิ้น","#FFF8E1")]},
+      {type:"box",layout:"vertical",backgroundColor:"#EDE7F6",paddingAll:"12px",cornerRadius:"10px",contents:[{type:"text",text:"💰 ยอดรวมเดือน",size:"sm",color:"#7C4DFF",weight:"bold"},{type:"text",text:grandTotal.toLocaleString()+" บาท",size:"xxl",weight:"bold",color:"#4527A0"},{type:"text",text:"📈 เฉลี่ย/วัน: "+avgPerDay.toLocaleString()+" บาท",size:"xs",color:"#9E9E9E",margin:"xs"}]},
+      {type:"separator"},{type:"text",text:"🍰 Top 5 เมนู",size:"sm",weight:"bold",color:"#555555"}
+    ].concat(top5.map(function(e,i){return {type:"box",layout:"horizontal",contents:[{type:"text",text:(i+1)+". "+e[0],size:"sm",color:"#555555",flex:4,wrap:true},{type:"text",text:e[1]+" ชิ้น",size:"sm",color:"#7C4DFF",flex:2,align:"end",weight:"bold"}]};}))
+    }
+  };
+  var orderBubbles = orders.slice(0,11).map(function(o){return buildOrderCardFlex(o.orderId,o.rows);});
+  return {type:"flex",altText:"📊 สรุปเดือน "+cleaned+" | "+orders.length+" ออเดอร์ | "+grandTotal.toLocaleString()+" บาท",contents:{type:"carousel",contents:[summaryBubble].concat(orderBubbles)}};
+}
+
+function buildSummaryChannelFlex(targetMonth) {
+  var cleaned = normalizeMonthInput(targetMonth);
+  var parts   = cleaned.split("/");
+  var mm = parts[0].padStart(2,"0"), yyyy = parts[1];
+  var rows = getOrderRows(function(r){ var p=formatDateTH(r.deliveryDate).split("/"); return p.length===3&&p[1]===mm&&p[2]===yyyy&&!isRowCancelled(r); });
+  if (rows.length === 0) return {type:"flex",altText:"📊 ไม่มีออเดอร์เดือน "+cleaned,contents:buildAlertFlex("📊 ไม่มีออเดอร์","เดือน "+cleaned,"#AAAAAA")};
+  var orders = groupRowsByOrder(rows);
+  var channelData={}, CHANNEL_COLORS=["#2196F3","#FF5722","#4CAF50","#FF9800","#9C27B0","#00BCD4"];
+  orders.forEach(function(o){ var mainRow=o.rows.find(function(r){return r.grandTotal!==""&&r.grandTotal!==null&&toNumber(r.grandTotal)>0;})||o.rows[0],ch=mainRow.channel||"ไม่ระบุ"; if(!channelData[ch]) channelData[ch]={orders:[],count:0,total:0}; channelData[ch].orders.push(o);channelData[ch].count++;channelData[ch].total+=toNumber(mainRow.grandTotal); });
+  var sorted   = Object.entries(channelData).sort(function(a,b){return b[1].total-a[1].total;});
+  var grandAll = sorted.reduce(function(s,e){return s+e[1].total;},0);
+  var overviewBubble = {
+    type:"bubble",size:"kilo",
+    header:{type:"box",layout:"vertical",backgroundColor:"#FF5722",paddingAll:"16px",contents:[{type:"text",text:"📡 Channel",size:"xs",color:"#FFE0D0",weight:"bold"},{type:"text",text:cleaned,size:"xxl",color:"#FFFFFF",weight:"bold"},{type:"text",text:"รวม "+orders.length+" ออเดอร์",size:"xs",color:"#FFD0C0",margin:"xs"}]},
+    body:{type:"box",layout:"vertical",paddingAll:"16px",spacing:"sm",contents:[
+      {type:"text",text:"📊 ยอดแยกตาม Channel",size:"sm",weight:"bold",color:"#555555",margin:"md"}
+    ].concat(sorted.map(function(e,i){ var ch=e[0],d=e[1]; var pct=grandAll>0?Math.round(d.total/grandAll*100):0,color=CHANNEL_COLORS[i%CHANNEL_COLORS.length]; return {type:"box",layout:"vertical",margin:"sm",paddingAll:"10px",backgroundColor:"#FAFAFA",cornerRadius:"8px",contents:[{type:"box",layout:"horizontal",contents:[{type:"text",text:"📡 "+ch,size:"sm",weight:"bold",color:color,flex:3},{type:"text",text:pct+"%",size:"sm",weight:"bold",color:color,flex:1,align:"end"}]},{type:"box",layout:"horizontal",margin:"xs",contents:[{type:"text",text:d.count+" ออเดอร์",size:"xs",color:"#888888",flex:2},{type:"text",text:d.total.toLocaleString()+" บาท",size:"xs",color:"#555555",flex:3,align:"end",weight:"bold"}]},{type:"box",layout:"horizontal",height:"6px",margin:"sm",backgroundColor:"#EEEEEE",cornerRadius:"3px",contents:[{type:"box",layout:"vertical",flex:pct||1,backgroundColor:color,cornerRadius:"3px",contents:[{type:"filler"}]},pct<100?{type:"filler"}:null].filter(Boolean)}]}; })).concat([
+      {type:"separator",margin:"md"},{type:"box",layout:"horizontal",margin:"md",contents:[{type:"text",text:"💰 รวมทั้งสิ้น",size:"md",weight:"bold",color:"#333333",flex:3},{type:"text",text:grandAll.toLocaleString()+" บาท",size:"md",weight:"bold",color:"#FF5722",flex:3,align:"end"}]}
+    ])}
+  };
+  var channelBubbles=[];
+  sorted.forEach(function(e,ci){ var ch=e[0],d=e[1]; var color=CHANNEL_COLORS[ci%CHANNEL_COLORS.length]; d.orders.forEach(function(o){ var b=buildOrderCardFlex(o.orderId,o.rows); b.header.backgroundColor=color; channelBubbles.push(b); }); });
+  return {type:"flex",altText:"📡 Channel เดือน "+cleaned+" | "+sorted.map(function(e){return e[0]+":"+e[1].count;}).join(", "),contents:{type:"carousel",contents:[overviewBubble].concat(channelBubbles).slice(0,12)}};
+}
+
+function buildSummaryTopMenuFlex(targetMonth) {
+  var cleaned = normalizeMonthInput(targetMonth);
+  var parts   = cleaned.split("/");
+  var mm = parts[0].padStart(2,"0"), yyyy = parts[1];
+  var rows = getOrderRows(function(r){ var p=formatDateTH(r.deliveryDate).split("/"); return p.length===3&&p[1]===mm&&p[2]===yyyy&&!isRowCancelled(r); });
+  if (rows.length === 0) return {type:"flex",altText:"📊 ไม่มีออเดอร์เดือน "+cleaned,contents:buildAlertFlex("📊 ไม่มีออเดอร์","เดือน "+cleaned,"#AAAAAA")};
+  var orders = groupRowsByOrder(rows);
+  var menuQty={};
+  rows.forEach(function(r){ if(r.menuName) menuQty[r.menuName]=(menuQty[r.menuName]||0)+toNumber(r.qty); });
+  var top10   = Object.entries(menuQty).sort(function(a,b){return b[1]-a[1];}).slice(0,10);
+  var maxQty  = top10[0]?top10[0][1]:1;
+  var MEDAL=["🥇","🥈","🥉"], BAR_COLORS=["#FFD700","#C0C0C0","#CD7F32","#FF6B6B","#FF9500","#4CAF50","#2196F3","#9C27B0","#00BCD4","#795548"];
+  return {type:"flex",altText:"🍰 Top Menu เดือน "+cleaned+" | อันดับ 1: "+(top10[0]?top10[0][0]:""),
+    contents:{type:"bubble",size:"kilo",
+      header:{type:"box",layout:"vertical",backgroundColor:"#FF9500",paddingAll:"16px",contents:[{type:"text",text:"🍰 Top Menu",size:"xs",color:"#FFF3E0",weight:"bold"},{type:"text",text:cleaned,size:"xxl",color:"#FFFFFF",weight:"bold"},{type:"text",text:"จาก "+orders.length+" ออเดอร์",size:"xs",color:"#FFE082",margin:"xs"}]},
+      body:{type:"box",layout:"vertical",paddingAll:"16px",spacing:"md",contents:top10.map(function(e,i){ var m=e[0],q=e[1]; var barFlex=Math.max(1,Math.round(q/maxQty*10)),color=BAR_COLORS[i]; return {type:"box",layout:"vertical",margin:"sm",contents:[{type:"box",layout:"horizontal",contents:[{type:"text",text:(MEDAL[i]||((i+1)+".")+" ")+m,size:"sm",weight:i<3?"bold":"regular",color:i<3?"#333333":"#555555",flex:5,wrap:true},{type:"text",text:q+" ชิ้น",size:"sm",color:color,flex:2,align:"end",weight:"bold"}]},{type:"box",layout:"horizontal",height:"8px",margin:"xs",backgroundColor:"#F5F5F5",cornerRadius:"4px",contents:[{type:"box",layout:"vertical",flex:barFlex,backgroundColor:color,cornerRadius:"4px",contents:[{type:"filler"}]},barFlex<10?{type:"filler"}:null].filter(Boolean)}]}; })}
+    }
+  };
+}
+
+function buildSuccessFlex(data, orderId) {
+  return {
+    type:"flex",altText:"✅ บันทึกออเดอร์แล้ว | "+data.customerName+" | "+data.grandTotal.toLocaleString()+" บาท",
+    contents:{type:"bubble",size:"kilo",
+      header:{type:"box",layout:"vertical",backgroundColor:"#4CAF50",paddingAll:"16px",contents:[{type:"text",text:"✅ บันทึกออเดอร์แล้ว",size:"sm",color:"#E8F5E9",weight:"bold"},{type:"text",text:data.customerName,size:"xl",color:"#FFFFFF",weight:"bold",wrap:true}]},
+      body:{type:"box",layout:"vertical",paddingAll:"16px",spacing:"sm",contents:[
+        {type:"box",layout:"horizontal",contents:[{type:"text",text:"Order ID",size:"xs",color:"#AAAAAA",flex:2},{type:"text",text:orderId,size:"xs",color:"#4CAF50",flex:3,align:"end",weight:"bold"}]},
+        {type:"box",layout:"horizontal",contents:[{type:"text",text:"📅 วันที่ส่ง",size:"sm",color:"#555555",flex:2},{type:"text",text:data.deliveryDate,size:"sm",color:"#333333",flex:3,align:"end"}]},
+        data.phone?{type:"box",layout:"horizontal",contents:[{type:"text",text:"📞 เบอร์",size:"sm",color:"#555555",flex:2},{type:"text",text:String(data.phone),size:"sm",color:"#333333",flex:3,align:"end"}]}:null,
+        {type:"box",layout:"horizontal",contents:[{type:"text",text:"📡 Channel",size:"sm",color:"#555555",flex:2},{type:"text",text:data.channel,size:"sm",color:"#333333",flex:3,align:"end"}]},
+        {type:"box",layout:"horizontal",contents:[{type:"text",text:"📋 Type",size:"sm",color:"#555555",flex:2},{type:"text",text:data.orderType,size:"sm",color:"#333333",flex:3,align:"end"}]},
+        data.deliveryType?{type:"box",layout:"horizontal",contents:[{type:"text",text:"🚗 จัดส่ง",size:"sm",color:"#555555",flex:2},{type:"text",text:data.deliveryType,size:"sm",color:"#333333",flex:3,align:"end"}]}:null,
+        data.deliveryTime?{type:"box",layout:"horizontal",contents:[{type:"text",text:"⏰ เวลาส่ง",size:"sm",color:"#555555",flex:2},{type:"text",text:String(data.deliveryTime),size:"sm",color:"#333333",flex:3,align:"end"}]}:null,
+        data.location?{type:"box",layout:"horizontal",contents:[{type:"text",text:"📍 สถานที่",size:"sm",color:"#555555",flex:2},{type:"text",text:String(data.location),size:"sm",color:"#333333",flex:3,align:"end",wrap:true}]}:null,
+        data.googleMap?{type:"box",layout:"horizontal",contents:[{type:"text",text:"🗺️ Map",size:"sm",color:"#555555",flex:2},{type:"text",text:"✅ มี",size:"sm",color:"#4CAF50",flex:3,align:"end"}]}:null,
+        {type:"box",layout:"horizontal",contents:[{type:"text",text:"🍰 เมนู",size:"sm",color:"#555555",flex:2},{type:"text",text:data.items.length+" รายการ",size:"sm",color:"#333333",flex:3,align:"end"}]},
+        data.note?{type:"box",layout:"horizontal",contents:[{type:"text",text:"📝 Note",size:"sm",color:"#555555",flex:2},{type:"text",text:String(data.note),size:"sm",color:"#333333",flex:3,align:"end",wrap:true}]}:null,
+        {type:"separator",margin:"md"},
+        {type:"box",layout:"horizontal",backgroundColor:"#E8F5E9",paddingAll:"10px",cornerRadius:"8px",margin:"md",contents:[{type:"text",text:"💰 รวมทั้งหมด",size:"md",weight:"bold",color:"#388E3C",flex:3},{type:"text",text:data.grandTotal.toLocaleString()+" บาท",size:"md",weight:"bold",color:"#4CAF50",flex:3,align:"end"}]}
+      ].filter(Boolean)},
+      footer:{type:"box",layout:"horizontal",spacing:"sm",paddingAll:"12px",contents:[
+        {type:"button",action:{type:"message",label:"📋 ออเดอร์วันนี้",text:"search today"},style:"secondary",height:"sm",flex:1},
+        {type:"button",action:{type:"message",label:"📅 7 วัน",text:"summary 7"},style:"primary",color:"#1565C0",height:"sm",flex:1}
+      ]}
+    }
+  };
+}
+
+function buildErrorFlex(errors) {
+  var today = getTodayTH();
+  return {type:"flex",altText:"❌ ข้อมูลไม่ครบ: "+errors.join(", "),
+    contents:{type:"bubble",size:"kilo",
+      header:{type:"box",layout:"vertical",backgroundColor:"#F44336",paddingAll:"16px",contents:[{type:"text",text:"❌ ข้อมูลไม่ครบ",size:"lg",color:"#FFFFFF",weight:"bold"},{type:"text",text:"กรุณาตรวจสอบฟิลด์ต่อไปนี้",size:"xs",color:"#FFCDD2",margin:"xs"}]},
+      body:{type:"box",layout:"vertical",paddingAll:"16px",spacing:"sm",contents:
+        errors.map(function(e){return {type:"box",layout:"horizontal",contents:[{type:"text",text:"⚠️",size:"sm",flex:1},{type:"text",text:e,size:"sm",color:"#D32F2F",flex:5,weight:"bold"}]};}).concat([
+        {type:"separator",margin:"md"},{type:"text",text:"📌 ตัวอย่างรูปแบบที่ถูกต้อง",size:"sm",weight:"bold",color:"#555555",margin:"md"},
+        {type:"box",layout:"vertical",backgroundColor:"#FFF8F8",paddingAll:"10px",cornerRadius:"8px",margin:"sm",contents:[
+          {type:"text",text:"วันที่ส่ง: "+today,size:"xs",color:"#555555"},
+          {type:"text",text:"Payment Date: "+today,size:"xs",color:"#555555"},
+          {type:"text",text:"ลูกค้า(ชื่อคนรับ): คุณA",size:"xs",color:"#555555"},
+          {type:"text",text:"Channel: LINE",size:"xs",color:"#555555"},
+          {type:"text",text:"Order Type: Wholesale",size:"xs",color:"#555555"},
+          {type:"text",text:"Table(ชื่อไลน์ลูกค้า): คุณA",size:"xs",color:"#555555"},
+          {type:"text",text:"รายการ:",size:"xs",color:"#555555"},
+          {type:"text",text:"- มินิเค้กรวมรส 3 ชิ้น = 390",size:"xs",color:"#555555"},
+          {type:"text",text:"รวมทั้งหมด: 390",size:"xs",color:"#D32F2F",weight:"bold"}
+        ]}
+      ])}
+    }
+  };
+}
+
+function buildNotFoundFlex() {
+  return {type:"flex",altText:"❓ ไม่พบข้อมูล — พิมพ์ help เพื่อดูคำสั่ง",
+    contents:{type:"bubble",size:"kilo",
+      header:{type:"box",layout:"vertical",backgroundColor:"#607D8B",paddingAll:"16px",contents:[{type:"text",text:"❓ ไม่พบข้อมูลที่บันทึกได้",size:"md",color:"#FFFFFF",weight:"bold"}]},
+      body:{type:"box",layout:"vertical",paddingAll:"16px",spacing:"sm",contents:[
+        {type:"text",text:"📌 ตัวอย่างบันทึกออเดอร์",size:"sm",weight:"bold",color:"#555555"},
+        {type:"box",layout:"vertical",backgroundColor:"#F5F5F5",paddingAll:"10px",cornerRadius:"8px",margin:"sm",contents:[
+          {type:"text",text:"วันที่ส่ง: "+getTodayTH(),size:"xs",color:"#555555"},
+          {type:"text",text:"ลูกค้า(ชื่อคนรับ): คุณA",size:"xs",color:"#555555"},
+          {type:"text",text:"Channel: LINE",size:"xs",color:"#555555"},
+          {type:"text",text:"Order Type: Wholesale",size:"xs",color:"#555555"},
+          {type:"text",text:"รายการ:",size:"xs",color:"#555555"},
+          {type:"text",text:"- มินิเค้กรวมรส 3 ชิ้น = 390",size:"xs",color:"#555555"},
+          {type:"text",text:"รวมทั้งหมด: 390",size:"xs",color:"#333333",weight:"bold"}
+        ]},
+        {type:"separator",margin:"md"},{type:"text",text:"💡 คำสั่งลัด",size:"sm",weight:"bold",color:"#555555",margin:"md"}
+      ].concat(["search today → ออเดอร์วันนี้","summary → สรุปยอดวันนี้","summary พรุ่งนี้ → พรุ่งนี้","summary 7 → แผน 7 วัน","help → คำสั่งทั้งหมด"].map(function(t){return {type:"text",text:t,size:"xs",color:"#888888"};}))}
+    }
+  };
+}
+
+function buildCancelConfirmFlex(orderId, customerName) {
+  return {type:"flex",altText:"❓ ยืนยันยกเลิก "+orderId+"?",
+    contents:{type:"bubble",size:"kilo",
+      header:{type:"box",layout:"vertical",backgroundColor:"#F44336",paddingAll:"16px",contents:[{type:"text",text:"⚠️ ยืนยันยกเลิกออเดอร์?",size:"md",color:"#FFFFFF",weight:"bold"},{type:"text",text:orderId+" | "+customerName,size:"xs",color:"#FFCDD2",margin:"xs"}]},
+      body:{type:"box",layout:"vertical",paddingAll:"16px",contents:[{type:"text",text:"พิมพ์คำสั่งต่อไปนี้เพื่อยืนยัน:",size:"sm",color:"#555555"},{type:"text",text:"cancel "+orderId+" confirm",size:"sm",color:"#F44336",weight:"bold",margin:"sm"}]},
+      footer:{type:"box",layout:"horizontal",spacing:"sm",paddingAll:"12px",contents:[
+        {type:"button",action:{type:"message",label:"✅ ยืนยันยกเลิก",text:"cancel "+orderId+" confirm"},style:"primary",color:"#F44336",height:"sm",flex:1},
+        {type:"button",action:{type:"message",label:"❌ ไม่ยกเลิก",text:"search today"},style:"secondary",height:"sm",flex:1}
+      ]}
+    }
+  };
+}
+
+function buildHelpFlex() {
+  var sections = [
+    {label:"🔍 SEARCH",color:"#2196F3",cmds:["search today","search latest","search [ชื่อลูกค้า]","search order [ID]","search phone [เบอร์]","search menu [ชื่อเมนู]","search date [dd/MM/พ.ศ.]"]},
+    {label:"📊 SUMMARY",color:"#4CAF50",cmds:["summary ← วันนี้","summary พรุ่งนี้","summary [dd/MM/พ.ศ.]","summary month [MM/พ.ศ.]","summary channel [MM/พ.ศ.]","summary top menu [MM/พ.ศ.]","summary 7 ← แผนการผลิต 7 วัน"]},
+    {label:"✏️ EDIT / CANCEL / STATUS",color:"#FF9500",cmds:["cancel [Order ID]","cancel [Order ID] confirm","edit [Order ID]","status [Order ID] confirmed","status [Order ID] preparing","status [Order ID] ready","status [Order ID] completed"]},
+    {label:"📋 LOG",color:"#795548",cmds:["log today","log date [dd/MM/พ.ศ.]","clear log","clear log confirm","clear log [dd/MM/พ.ศ.]"]}
+  ];
+  var bodyContents = [];
+  sections.forEach(function(s) {
+    bodyContents.push({type:"text",text:s.label,size:"sm",weight:"bold",color:s.color,margin:"md"});
+    s.cmds.forEach(function(c) { bodyContents.push({type:"text",text:"• "+c,size:"xs",color:"#555555",margin:"xs",wrap:true}); });
+  });
+  bodyContents.push({type:"separator",margin:"md"});
+  bodyContents.push({type:"text",text:"💡 ภาษาไทยก็ได้!",size:"xs",color:"#888888",margin:"md"});
+  bodyContents.push({type:"text",text:"\"ออเดอร์วันนี้\"  \"พรุ่งนี้\"  \"สรุปวันนี้\"  \"เมนูยอดนิยม\"  \"แผนการผลิต\"",size:"xs",color:"#888888",wrap:true});
+  return {type:"flex",altText:"📖 คำสั่งทั้งหมด — search, summary, log, cancel, edit",
+    contents:{type:"bubble",size:"kilo",
+      header:{type:"box",layout:"vertical",backgroundColor:"#37474F",paddingAll:"16px",contents:[{type:"text",text:"📖 คำสั่งทั้งหมด",size:"lg",color:"#FFFFFF",weight:"bold"},{type:"text",text:"ไก่จ๋า Order Bot v2",size:"xs",color:"#B0BEC5",margin:"xs"}]},
+      body:{type:"box",layout:"vertical",paddingAll:"16px",spacing:"none",contents:bodyContents},
+      footer:{type:"box",layout:"vertical",spacing:"sm",paddingAll:"12px",contents:[
+        {type:"box",layout:"horizontal",spacing:"sm",contents:[
+          {type:"button",action:{type:"message",label:"📅 summary 7",text:"summary 7"},style:"primary",color:"#1565C0",height:"sm",flex:1},
+          {type:"button",action:{type:"message",label:"📊 summary",text:"summary"},style:"primary",color:"#4CAF50",height:"sm",flex:1}
+        ]},
+        {type:"box",layout:"horizontal",spacing:"sm",contents:[
+          {type:"button",action:{type:"clipboard",label:"📋 คัดลอกฟอร์ม",clipboardText:getOrderFormTemplate()},style:"secondary",height:"sm",flex:1},
+          {type:"button",action:{type:"clipboard",label:"📋 คัดลอกคำสั่ง",clipboardText:"คำสั่งลัด ไก่จ๋า:\n\nsearch today\nsummary\nsummary พรุ่งนี้\nsummary 7\nsummary month\nsummary channel\nsummary top menu\nsearch latest\ncancel [ID]\nedit [ID]\nstatus [ID] confirmed\nstatus [ID] preparing\nstatus [ID] ready\nhelp"},style:"secondary",height:"sm",flex:1}
+        ]}
+      ]}
+    }
+  };
+}
+
+// ============================================================
+//  FORM TEMPLATE
+// ============================================================
+function getOrderFormTemplate() {
+  var today = getTodayTH();
+  return "วันที่ส่ง: "+today+"\nPayment Date: "+today+"\nลูกค้า(ชื่อคนรับ): \nเบอร์: \nChannel: LINE\nOrder Type: Wholesale\nTable(ชื่อไลน์ลูกค้า): \nประเภท: Delivery\nเวลาส่ง: \nสถานที่: \nGoogle Map: \nค่าส่ง: \nรายการ:\n- \nรวมทั้งหมด: \nNote:";
+}
+
+// ============================================================
+//  HELPERS
+// ============================================================
+function buildStatBox(icon, value, label, bgColor) {
+  return {type:"box",layout:"vertical",flex:1,alignItems:"center",paddingAll:"8px",backgroundColor:bgColor,cornerRadius:"8px",contents:[{type:"text",text:icon,size:"xl",align:"center"},{type:"text",text:value,size:"lg",weight:"bold",color:"#333333",align:"center"},{type:"text",text:label,size:"xxs",color:"#888888",align:"center"}]};
+}
+function buildAlertFlex(title, subtitle, color) {
+  return {type:"bubble",size:"kilo",body:{type:"box",layout:"vertical",justifyContent:"center",alignItems:"center",paddingAll:"24px",spacing:"md",contents:[{type:"text",text:title,size:"lg",weight:"bold",color:color,align:"center"},{type:"text",text:subtitle,size:"sm",color:"#888888",align:"center",wrap:true}]}};
+}
+
+// ============================================================
+//  REPLY HELPERS
+// ============================================================
+function replyLine(replyToken, message) {
+  UrlFetchApp.fetch("https://api.line.me/v2/bot/message/reply", {
+    method: "post",
+    headers: { "Authorization": "Bearer " + LINE_CHANNEL_ACCESS_TOKEN, "Content-Type": "application/json" },
+    payload: JSON.stringify({ replyToken: replyToken, messages: [{ type:"text", text: String(message||"").substring(0,5000) }] }),
+    muteHttpExceptions: true
+  });
+}
+
+function replyFlexWithQuickReply(replyToken, flexPayload, buttonLabels) {
+  var items = (buttonLabels||[]).slice(0,13).map(function(label) {
+    return {
+      type:"action",
+      action:{type:"message",label:String(label).substring(0,20),text:String(label)}
+    };
+  });
+  var message = Object.assign({}, flexPayload, {
+    quickReply: items.length > 0 ? {items:items} : undefined
+  });
+  UrlFetchApp.fetch("https://api.line.me/v2/bot/message/reply", {
+    method: "post",
+    headers: { "Authorization":"Bearer "+LINE_CHANNEL_ACCESS_TOKEN, "Content-Type":"application/json" },
+    payload: JSON.stringify({ replyToken: replyToken, messages: [message] }),
+    muteHttpExceptions: true
+  });
+}
+
+function replyLineWithQuickReply(replyToken, message, buttonLabels) {
+  var items = (buttonLabels||[]).slice(0,13).map(function(label) {
+    return {
+      type:"action",
+      action:{type:"message",label:String(label).substring(0,20),text:String(label)}
+    };
+  });
+  UrlFetchApp.fetch("https://api.line.me/v2/bot/message/reply", {
+    method: "post",
+    headers: { "Authorization":"Bearer "+LINE_CHANNEL_ACCESS_TOKEN, "Content-Type":"application/json" },
+    payload: JSON.stringify({ replyToken: replyToken, messages: [{type:"text",text:String(message||"").substring(0,5000),quickReply:{items:items}}] }),
+    muteHttpExceptions: true
+  });
+}
+
+// ============================================================
+//  SMART SEARCH — 🔧 FIX 2: ปรับให้ search ได้ครบถ้วน
+// ============================================================
+function smartSearch(keyword) {
+  var k = keyword.trim();
+  if (/^\d{6,}$/.test(k))
+    return {rows:getOrderRows(function(r){return String(r.phone).includes(k);}),label:"เบอร์: "+k,type:"phone"};
+  if (/^ord-/i.test(k))
+    return {rows:getOrderRows(function(r){return r.orderId.toLowerCase().includes(k.toLowerCase());}),label:"Order ID: "+k,type:"order"};
+  // 🔧 FIX: ดึง ALL rows ของลูกค้า (ไม่ filter grandTotal ที่นี่)
+  var customerRows = getOrderRows(function(r){return r.customerName.toLowerCase().includes(k.toLowerCase());});
+  if (customerRows.length > 0) return {rows:customerRows,label:"ลูกค้า: "+k,type:"customer"};
+  var menuRows = getOrderRows(function(r){return r.menuName.toLowerCase().includes(k.toLowerCase());});
+  if (menuRows.length > 0) return {rows:menuRows,label:"เมนู: "+k,type:"menu"};
+  return {rows:[],label:"ค้นหา: "+k,type:"unknown"};
+}
+
+// ============================================================
+//  AUTO-SUGGEST
+// ============================================================
+function buildAutoSuggest(text) {
+  var lower = String(text||"").toLowerCase().trim();
+  if (/ดู|หา|ค้น|search|find/.test(lower) && /ออเดอร์|order/.test(lower))
+    return "💡 คุณหมายถึง \"search today\" หรือเปล่าคะ?\nหรือพิมพ์ \"search [ชื่อลูกค้า]\" เพื่อค้นหาออเดอร์";
+  if (/สรุป|summary|ยอด/.test(lower))
+    return "💡 คุณหมายถึง:\n• \"summary\" → สรุปวันนี้\n• \"summary พรุ่งนี้\" → พรุ่งนี้\n• \"summary 7\" → แผน 7 วัน\n• \"summary month\" → สรุปเดือน";
+  return null;
+}
+
+// ============================================================
+//  CANCEL / EDIT HANDLERS
+// ============================================================
+function handleCancel(orderId, confirm, replyToken) {
+  var sheet = getSheet(), data = sheet.getDataRange().getValues(), headers = data[0];
+  var orderIdCol = headers.indexOf("Order ID"), statusCol = headers.indexOf("Status");
+  var matchRows  = [];
+  for (var i=1; i<data.length; i++) {
+    if (String(data[i][orderIdCol]).trim().toLowerCase() === orderId.trim().toLowerCase()) matchRows.push(i);
+  }
+  if (matchRows.length === 0) { replyFlexWithQuickReply(replyToken, buildAlertFlex("❌ ไม่พบ Order",orderId,"#F44336"), QR_MAIN); return true; }
+  var customerName = data[matchRows[0]][headers.indexOf("Customer Name")] || "-";
+  if (!confirm) { replyFlexWithQuickReply(replyToken, buildCancelConfirmFlex(orderId,customerName), ["cancel "+orderId+" confirm","search today"]); return true; }
+  if (statusCol < 0) { replyLine(replyToken,"⚠️ ไม่พบคอลัมน์ Status ใน Sheet\nกรุณารัน setupSheet() ก่อนค่ะ"); return true; }
+  matchRows.forEach(function(i) { sheet.getRange(i+1, statusCol+1).setValue("Cancelled"); });
+  clearSheetCache();
+  replyFlexWithQuickReply(replyToken, buildAlertFlex("🗑️ ยกเลิกออเดอร์แล้ว", orderId+" | "+customerName, "#F44336"), QR_MAIN);
+  return true;
+}
+
+function handleEdit(orderId, replyToken) {
+  var rows = getOrderRows(function(r){ return r.orderId.toLowerCase() === orderId.trim().toLowerCase(); });
+  if (rows.length === 0) { replyFlexWithQuickReply(replyToken, buildAlertFlex("❌ ไม่พบ Order",orderId,"#F44336"), QR_MAIN); return true; }
+  var main            = rows[0];
+  var deliveryDateStr = formatDateTH(main.deliveryDate);
+  var paymentDateStr  = formatDateTH(main.paymentDate || main.deliveryDate);
+  var deliveryTimeStr = formatTimeTH(main.deliveryTime);
+  var msg = "✏️ แก้ไข Order: "+orderId+"\n\n";
+  msg += "วันที่ส่ง: "+deliveryDateStr+"\nPayment Date: "+paymentDateStr+"\n";
+  msg += "ลูกค้า(ชื่อคนรับ): "+main.customerName+"\n";
+  if (main.phone) msg += "เบอร์: "+main.phone+"\n";
+  msg += "Channel: "+main.channel+"\nOrder Type: "+main.orderType+"\n";
+  if (main.deliveryType) msg += "ประเภท: "+main.deliveryType+"\n";
+  if (deliveryTimeStr)   msg += "เวลาส่ง: "+deliveryTimeStr+"\n";
+  if (main.location)     msg += "สถานที่: "+main.location+"\n";
+  if (main.googleMap)    msg += "Google Map: "+main.googleMap+"\n";
+  msg += "Table(ชื่อไลน์ลูกค้า): "+(main.tableName||main.customerName)+"\nรายการ:\n";
+  rows.forEach(function(r) { msg += "- "+r.menuName+" "+toNumber(r.qty)+" "+(r.unit||"ชิ้น")+"="+toNumber(r.itemTotal)+"\n"; });
+  msg += "รวมทั้งหมด: "+toNumber(main.grandTotal)+"\n";
+  if (main.note) msg += "Note: "+main.note+"\n";
+  msg += "\n💡 คัดลอก → แก้ไข → ส่งกลับมาได้เลยค่ะ\n(ระบบจะบันทึกเป็นออเดอร์ใหม่)";
+  replyLineWithQuickReply(replyToken, msg, ["cancel "+orderId,"search today","help"]);
+  return true;
+}
+
+// ============================================================
+//  ADMIN COMMANDS ROUTER — 🔧 FIXED search latest
+// ============================================================
+function handleAdminCommand(text, replyToken) {
+  var trimmed = text.trim();
+  var lower   = trimmed.toLowerCase();
+
+  if (lower === "help") { replyFlexWithQuickReply(replyToken, buildHelpFlex(), QR_HELP); return true; }
+  if (lower === "📋 คัดลอกฟอร์ม") { replyLine(replyToken, getOrderFormTemplate()); return true; }
+
+  if (/^cancel\s+\S+/i.test(lower)) {
+    var p = trimmed.split(/\s+/);
+    return handleCancel(p[1], p[2] && p[2].toLowerCase() === "confirm", replyToken);
+  }
+  if (/^ยกเลิก\s+\S+/i.test(trimmed)) {
+    var p2 = trimmed.split(/\s+/);
+    return handleCancel(p2[1], p2[2] && (p2[2]==="ยืนยัน"||p2[2].toLowerCase()==="confirm"), replyToken);
+  }
+
+  if (/^edit\s+\S+/i.test(lower) || /^แก้ไข\s+\S+/i.test(trimmed)) {
+    return handleEdit(trimmed.split(/\s+/)[1], replyToken);
+  }
+
+  if (/^status\s+\S+\s+\w+/i.test(lower)) {
+    return handleStatusUpdateCommand(trimmed, replyToken);
+  }
+
+  if (lower === "search today") {
+    var today = getTodayTH();
+    // 🔧 FIX: ดึง ALL rows ของวันนี้ (ไม่ filter grandTotal ตรงนี้)
+    var rows  = getOrderRows(function(r) { return formatDateTH(r.deliveryDate) === today && !isRowCancelled(r); });
+    replyFlexWithQuickReply(replyToken, buildOrderListFlex(rows,"ออเดอร์วันนี้ ("+today+")"), rows.length>0?QR_SEARCH:QR_NO_ORDERS);
+    return true;
+  }
+
+  if (lower === "search latest") {
+    // 🔧 FIX 2: ดึง ALL rows, group แล้วค่อย filter เอา order ที่มี grandTotal
+    var allRows    = getOrderRows(function(r) { return !isRowCancelled(r); });
+    var allOrders  = groupRowsByOrder(allRows);
+    // filter เอาเฉพาะ order ที่มี grandTotal > 0
+    var validOrders = allOrders.filter(function(o) {
+      return o.rows.some(function(r) {
+        return r.grandTotal !== "" && r.grandTotal !== null && r.grandTotal !== undefined && toNumber(r.grandTotal) > 0;
+      });
+    });
+    var latest5    = validOrders.slice(-5).reverse();
+    var latestRows = [];
+    latest5.forEach(function(o) { o.rows.forEach(function(r) { latestRows.push(r); }); });
+    replyFlexWithQuickReply(replyToken, buildOrderListFlex(latestRows,"5 ออเดอร์ล่าสุด"), QR_SEARCH);
+    return true;
+  }
+
+  if (/^search order \S+/i.test(lower)) {
+    var k = trimmed.slice("search order ".length).trim().toLowerCase();
+    replyFlexWithQuickReply(replyToken, buildOrderListFlex(getOrderRows(function(r){return r.orderId.toLowerCase().includes(k);}), "Order ID: "+k), QR_SEARCH);
+    return true;
+  }
+  if (/^search phone \S+/i.test(lower)) {
+    var k2 = trimmed.slice("search phone ".length).trim();
+    replyFlexWithQuickReply(replyToken, buildOrderListFlex(getOrderRows(function(r){return String(r.phone).includes(k2);}), "เบอร์: "+k2), QR_SEARCH);
+    return true;
+  }
+  if (/^search menu \S+/i.test(lower)) {
+    var k3 = trimmed.slice("search menu ".length).trim().toLowerCase();
+    replyFlexWithQuickReply(replyToken, buildOrderListFlex(getOrderRows(function(r){return r.menuName.toLowerCase().includes(k3);}), "เมนู: "+trimmed.slice("search menu ".length).trim()), QR_SEARCH);
+    return true;
+  }
+  if (/^search date \[?\d{1,2}\/\d{1,2}\/\d{4}\]?$/i.test(lower)) {
+    var d = trimmed.slice("search date ".length).trim().replace(/[\[\]]/g,"");
+    replyFlexWithQuickReply(replyToken, buildOrderListFlex(getOrderRows(function(r){return formatDateTH(r.deliveryDate)===d;}), "วันที่ "+d), QR_SEARCH);
+    return true;
+  }
+  if (/^search \S+/i.test(lower)) {
+    var k4      = trimmed.slice("search ".length).trim();
+    var result = smartSearch(k4);
+    replyFlexWithQuickReply(replyToken, buildOrderListFlex(result.rows, result.label), QR_SEARCH);
+    return true;
+  }
+
+  if (lower === "summary 7") {
+    replyFlexWithQuickReply(replyToken, buildSummary7DaysFlex(), QR_SUMMARY);
+    return true;
+  }
+  if (lower === "summary พรุ่งนี้" || lower === "summary tomorrow") {
+    replyFlexWithQuickReply(replyToken, buildSummaryDateFlex(getTomorrowTH(),"พรุ่งนี้"), QR_SUMMARY);
+    return true;
+  }
+  if (lower === "summary") {
+    replyFlexWithQuickReply(replyToken, buildSummaryDateFlex(getTodayTH(),"วันนี้"), QR_SUMMARY);
+    return true;
+  }
+  if (/^summary \[?\d{1,2}\/\d{1,2}\/\d{4}\]?$/i.test(lower)) {
+    var d2 = trimmed.slice("summary ".length).trim().replace(/[\[\]]/g,"");
+    replyFlexWithQuickReply(replyToken, buildSummaryDateFlex(d2,"วันที่ "+d2), QR_SUMMARY);
+    return true;
+  }
+  if (/^summary month/i.test(lower)) {
+    var raw  = normalizeMonthInput(trimmed.slice("summary month".length).trim());
+    var now  = new Date();
+    var smm   = String(now.getMonth()+1).padStart(2,"0");
+    var syyyy = now.getFullYear()+543;
+    replyFlexWithQuickReply(replyToken, buildSummaryMonthFlex(raw||smm+"/"+syyyy), QR_SUMMARY);
+    return true;
+  }
+  if (/^summary channel/i.test(lower)) {
+    var raw2  = normalizeMonthInput(trimmed.slice("summary channel".length).trim());
+    var now2  = new Date();
+    var smm2   = String(now2.getMonth()+1).padStart(2,"0");
+    var syyyy2 = now2.getFullYear()+543;
+    replyFlexWithQuickReply(replyToken, buildSummaryChannelFlex(raw2||smm2+"/"+syyyy2), QR_SUMMARY);
+    return true;
+  }
+  if (/^summary top menu/i.test(lower)) {
+    var raw3  = normalizeMonthInput(trimmed.slice("summary top menu".length).trim());
+    var now3  = new Date();
+    var smm3   = String(now3.getMonth()+1).padStart(2,"0");
+    var syyyy3 = now3.getFullYear()+543;
+    replyFlexWithQuickReply(replyToken, buildSummaryTopMenuFlex(raw3||smm3+"/"+syyyy3), QR_SUMMARY);
+    return true;
+  }
+
+  if (lower === "log today") {
+    var today2 = getTodayTH(), props = PropertiesService.getScriptProperties(), allProps = props.getProperties();
+    var keys  = Object.keys(allProps).filter(function(k){return k.startsWith("msg_")&&allProps[k]===today2;});
+    if (keys.length === 0) replyFlexWithQuickReply(replyToken, buildAlertFlex("📋 ไม่มี log วันนี้",today2,"#AAAAAA"), QR_MAIN);
+    else { var msg2="📋 log วันนี้ "+today2+" ("+keys.length+" รายการ)\n\n"; keys.forEach(function(k){msg2+="  • "+k.replace("msg_","")+"\n";}); replyLineWithQuickReply(replyToken,msg2.trim(),QR_MAIN); }
+    return true;
+  }
+  if (/^log date \[?\d{1,2}\/\d{1,2}\/\d{4}\]?$/i.test(lower)) {
+    var targetDate = trimmed.slice("log date ".length).trim().replace(/[\[\]]/g,"");
+    var props2 = PropertiesService.getScriptProperties(), allProps2 = props2.getProperties();
+    var keys2  = Object.keys(allProps2).filter(function(k){return k.startsWith("msg_")&&allProps2[k]===targetDate;});
+    if (keys2.length === 0) replyFlexWithQuickReply(replyToken, buildAlertFlex("📋 ไม่มี log","วันที่ "+targetDate,"#AAAAAA"), QR_MAIN);
+    else { var msg3="📋 log วันที่ "+targetDate+" ("+keys2.length+" รายการ)\n\n"; keys2.forEach(function(k){msg3+="  • "+k.replace("msg_","")+"\n";}); replyLineWithQuickReply(replyToken,msg3.trim(),QR_MAIN); }
+    return true;
+  }
+  if (lower === "clear log") {
+    var props3 = PropertiesService.getScriptProperties(), allProps3 = props3.getProperties();
+    var keys3  = Object.keys(allProps3).filter(function(k){return k.startsWith("msg_");});
+    if (keys3.length === 0) { replyFlexWithQuickReply(replyToken, buildAlertFlex("📋 ไม่มี Message ID ใน log","","#AAAAAA"), QR_MAIN); return true; }
+    var grouped = {};
+    keys3.forEach(function(k){ var date=allProps3[k]||"unknown"; grouped[date]=(grouped[date]||0)+1; });
+    var msg4 = "📋 log ทั้งหมด "+keys3.length+" รายการ\n\n";
+    Object.keys(grouped).sort().forEach(function(date){ msg4+="📅 "+date+": "+grouped[date]+" รายการ\n"; });
+    msg4 += "\n\"clear log confirm\" → ลบทั้งหมด\n\"clear log dd/MM/พ.ศ.\" → ลบวันที่ระบุ";
+    replyLineWithQuickReply(replyToken, msg4, ["clear log confirm","search today","summary"]);
+    return true;
+  }
+  if (lower === "clear log confirm") {
+    var props4 = PropertiesService.getScriptProperties(), allProps4 = props4.getProperties();
+    var keys4  = Object.keys(allProps4).filter(function(k){return k.startsWith("msg_");});
+    keys4.forEach(function(k){props4.deleteProperty(k);});
+    replyFlexWithQuickReply(replyToken, buildAlertFlex("🗑️ ลบ log ทั้งหมดแล้ว "+keys4.length+" รายการ","✅ ระบบพร้อมรับออเดอร์ใหม่แล้ว","#4CAF50"), QR_MAIN);
+    return true;
+  }
+  if (/^clear log \[?\d{1,2}\/\d{1,2}\/\d{4}\]?$/i.test(lower)) {
+    var targetDate2 = trimmed.slice("clear log ".length).trim().replace(/[\[\]]/g,"");
+    var props5 = PropertiesService.getScriptProperties(), allProps5 = props5.getProperties();
+    var keys5  = Object.keys(allProps5).filter(function(k){return k.startsWith("msg_")&&allProps5[k]===targetDate2;});
+    if (keys5.length === 0) { replyFlexWithQuickReply(replyToken, buildAlertFlex("📋 ไม่มี log","วันที่ "+targetDate2,"#AAAAAA"), QR_MAIN); return true; }
+    keys5.forEach(function(k){props5.deleteProperty(k);});
+    replyFlexWithQuickReply(replyToken, buildAlertFlex("🗑️ ลบ log วันที่ "+targetDate2+" แล้ว "+keys5.length+" รายการ","✅ ระบบพร้อมรับออเดอร์ใหม่แล้ว","#4CAF50"), QR_MAIN);
+    return true;
+  }
+
+  var resolved = resolveAlias(trimmed);
+  if (resolved && resolved.toLowerCase() !== lower) {
+    return handleAdminCommand(resolved, replyToken);
+  }
+
+  return false;
+}
+
+// ============================================================
+//  GROUP ROWS
+// ============================================================
+function groupRowsByOrder(rows) {
+  var orderMap = {}, orderIds = [];
+  rows.forEach(function(r) { var id=String(r.orderId); if(!orderMap[id]){orderMap[id]=[];orderIds.push(id);} orderMap[id].push(r); });
+  return orderIds.map(function(id){ return {orderId:id, rows:orderMap[id]}; });
+}
+
+// ============================================================
+//  GET ORDER ROWS — 🔧 FIXED: null safety + robust comparison
+// ============================================================
+function getOrderRows(filterFn) {
+  var data    = getSheetDataCached();
+  var headers = data[0];
+  var idx = {
+    orderId:      headers.indexOf("Order ID"),
+    deliveryDate: headers.indexOf("Delivery Date"),
+    paymentDate:  headers.indexOf("Payment Date"),
+    customerName: headers.indexOf("Customer Name"),
+    phone:        headers.indexOf("Phone"),
+    channel:      headers.indexOf("Channel"),
+    menuName:     headers.indexOf("Menu Name"),
+    unit:         headers.indexOf("Unit"),
+    qty:          headers.indexOf("Quantity"),
+    unitPrice:    headers.indexOf("Unit Price"),
+    grandTotal:   headers.indexOf("Grand Total"),
+    deliveryFee:  headers.indexOf("Delivery Fee"),
+    orderType:    headers.indexOf("Order Type"),
+    deliveryType: headers.indexOf("Delivery Type"),
+    deliveryTime: headers.indexOf("Delivery Time"),
+    location:     headers.indexOf("Location"),
+    note:         headers.indexOf("Note"),
+    itemTotal:    headers.indexOf("Item Total"),
+    tableName:    headers.indexOf("Table"),
+    googleMap:    headers.indexOf("Google Map"),
+    status:       headers.indexOf("Status")
+  };
+
+  // 🔧 FIX: helper เพื่อ handle missing columns safely
+  function safeGet(row, colIdx) {
+    if (colIdx < 0 || colIdx >= row.length) return "";
+    var v = row[colIdx];
+    if (v === null || v === undefined) return "";
+    return v;
+  }
+
+  return data.slice(1).map(function(r) {
+    return {
+      orderId:      safeGet(r, idx.orderId),
+      deliveryDate: safeGet(r, idx.deliveryDate),
+      paymentDate:  safeGet(r, idx.paymentDate),
+      customerName: safeGet(r, idx.customerName),
+      phone:        formatPhoneNumber(safeGet(r, idx.phone)),
+      channel:      safeGet(r, idx.channel),
+      menuName:     safeGet(r, idx.menuName),
+      unit:         safeGet(r, idx.unit),
+      qty:          safeGet(r, idx.qty),
+      unitPrice:    safeGet(r, idx.unitPrice),
+      grandTotal:   safeGet(r, idx.grandTotal),
+      deliveryFee:  safeGet(r, idx.deliveryFee),
+      orderType:    safeGet(r, idx.orderType),
+      deliveryType: safeGet(r, idx.deliveryType),
+      deliveryTime: safeGet(r, idx.deliveryTime),
+      location:     safeGet(r, idx.location),
+      note:         safeGet(r, idx.note),
+      itemTotal:    safeGet(r, idx.itemTotal),
+      tableName:    safeGet(r, idx.tableName),
+      googleMap:    safeGet(r, idx.googleMap),
+      status:       safeGet(r, idx.status)
+    };
+  }).filter(filterFn);
+}
+
+function formatPhoneNumber(value) {
+  if (!value && value !== 0) return "";
+  var str = String(value).replace(/\.0$/,"").trim();
+  if (/^\d{9}$/.test(str)) return "0" + str;
+  return str;
+}
+
+// ============================================================
+//  MAIN PARSER
+// ============================================================
+function extractItemsBlock(text) {
+  var match = String(text||"").match(/รายการ\s*:\s*([\s\S]*?)(?:\n\s*(?:รวมทั้งหมด|รวม|ยอดรวม|total)\s*:|$)/i);
+  return match ? match[1].trim() : "";
+}
+
+function parseOrder(text) {
+  var rawDeliveryDate = getValue(text,"วันที่ส่ง");
+  var rawPaymentDate  = getValue(text,"Payment Date");
+  var itemsBlock      = extractItemsBlock(text);
+  var grandTotalRaw = getValue(text,"รวมทั้งหมด")||getValue(text,"รวม")||getValue(text,"ยอดรวม")||getValue(text,"Total");
+  if (!grandTotalRaw) {
+    var m = String(text).match(/(?:รวมทั้งหมด|รวม|ยอดรวม|total)\s*:?\s*([\d,]+)/i);
+    if (m) grandTotalRaw = m[1];
+  }
+  var data = {
+    orderId:      getValue(text,"ORDER_ID"),
+    deliveryDate: formatDateTH(rawDeliveryDate),
+    paymentDate:  formatDateTH(rawPaymentDate||rawDeliveryDate),
+    customerName: getValue(text,"ลูกค้า(ชื่อคนรับ)")||getValue(text,"ลูกค้า")||getValue(text,"ชื่อ"),
+    phone:        getValue(text,"เบอร์")||getValue(text,"เบอร์โทร")||getValue(text,"Tel")||getValue(text,"Phone"),
+    channel:      getValue(text,"Channel")||getValue(text,"ช่องทาง"),
+    orderType:    getValue(text,"Order Type")||getValue(text,"ประเภทออเดอร์"),
+    tableName:    getValue(text,"Table(ชื่อไลน์ลูกค้า)")||getValue(text,"Table")||getValue(text,"ไลน์"),
+    deliveryType: getValue(text,"ประเภท")||getValue(text,"Delivery Type"),
+    deliveryTime: getValue(text,"เวลาส่ง")||getValue(text,"เวลา"),
+    location:     getValue(text,"สถานที่")||getValue(text,"ที่อยู่")||getValue(text,"Address"),
+    deliveryFee:  toNumber(getValue(text,"ค่าส่ง")||getValue(text,"Delivery Fee")),
+    grandTotal:   toNumber(grandTotalRaw),
+    note:         getValue(text,"Note")||getValue(text,"หมายเหตุ"),
+    googleMap:    getValue(text,"Google Map")||getValue(text,"Google map")||getValue(text,"แผนที่"),
+    paymentStatus:"Paid",
+    items:        []
+  };
+  if (!data.orderId) data.orderId = generateOrderId();
+  data.items = parseItems(itemsBlock);
+  if (data.items.length === 0) data.items = parseItems(String(text||""));
+  return data;
+}
+
+function getValue(text, label) {
+  var lines      = String(text||"").split("\n");
+  var labelRegex = new RegExp("^"+escapeRegex(label)+"\\s*:?\\s*(.*)$","i");
+  for (var i=0; i<lines.length; i++) {
+    var m = lines[i].match(labelRegex);
+    if (m) {
+      var value = (m[1]||"").trim(), j = i+1;
+      while (j < lines.length) {
+        var next = lines[j].trim();
+        if (!next){j++;continue;}
+        if (/^(วันที่ส่ง|Payment Date|ลูกค้า\(ชื่อคนรับ\)|ลูกค้า|เบอร์|Channel|Order Type|Table\(ชื่อไลน์ลูกค้า\)|Table|ประเภท|เวลาส่ง|สถานที่|ค่าส่ง|รวมทั้งหมด|รวม|ยอดรวม|Note|หมายเหตุ|รายการ|Google\s*Map|แผนที่)\s*:?/i.test(next)) break;
+        if (label !== "รายการ"){value += (value?" ":"")+next;}
+        j++;
+      }
+      return value.trim();
+    }
+  }
+  return "";
+}
+function escapeRegex(str) { return str.replace(/[.*+?^${}()|[\]\\]/g,"\\$&"); }
+function toNumber(value) {
+  if (value===null||value===undefined) return 0;
+  var n = Number(String(value).replace(/,/g,"").replace(/฿/g,"").replace(/บาท/g,"").replace(/\s/g,"").trim());
+  return isNaN(n) ? 0 : n;
+}
+
+function generateOrderId() {
+  var now  = new Date();
+  var dd   = Utilities.formatDate(now, TIMEZONE, "dd");
+  var mm   = Utilities.formatDate(now, TIMEZONE, "MM");
+  var yyyy = parseInt(Utilities.formatDate(now, TIMEZONE, "yyyy"), 10) + 543;
+  var time = Utilities.formatDate(now, TIMEZONE, "HHmmss");
+  return "ORD-" + dd + mm + yyyy + "-" + time;
+}
+
+function getSheet() {
+  var ss    = SpreadsheetApp.openById(SPREADSHEET_ID);
+  var sheet = ss.getSheetByName(SHEET_NAME);
+  if (!sheet) throw new Error("ไม่พบชีตชื่อ "+SHEET_NAME);
+  return sheet;
+}
+
+function setupSheet() {
+  var sheet = getSheet();
+  sheet.clearContents();
+  sheet.getRange(1,1,1,24).setValues([[
+    "Timestamp","Order ID","Delivery Date","Payment Date","Customer Name","Phone",
+    "Channel","Order Type","Table","Delivery Type","Delivery Time","Location",
+    "Menu Name","Unit","Quantity","Unit Price","Item Total",
+    "Delivery Fee","Grand Total","Payment Status","Note","Google Map","Status","Raw Text"
+  ]]);
+}
+
+function saveToSheet(data, rawText) {
+  var sheet = getSheet();
+  if (!data.items || data.items.length === 0) throw new Error("ไม่พบรายการสินค้า");
+  var timestamp = getTimestampTH();
+  var rows = data.items.map(function(item,i) {
+    return [
+      timestamp,
+      data.orderId,
+      data.deliveryDate,
+      data.paymentDate,
+      data.customerName,
+      String(data.phone||""),
+      data.channel,
+      data.orderType,
+      data.tableName,
+      data.deliveryType,
+      data.deliveryTime,
+      data.location,
+      item.menuName,
+      item.unit||"",
+      item.quantity,
+      item.unitPrice,
+      item.itemTotal,
+      i===0 ? data.deliveryFee   : "",
+      i===0 ? data.grandTotal    : "",
+      data.paymentStatus,
+      data.note,
+      data.googleMap||"",
+      "",
+      rawText
+    ];
+  });
+  var startRow = sheet.getLastRow() + 1;
+  sheet.getRange(startRow, 1, rows.length, rows[0].length).setValues(rows);
+
+  var timeColIndex = 11;
+  sheet.getRange(startRow, timeColIndex, rows.length, 1).setNumberFormat("@");
+
+  clearSheetCache();
+  return data.orderId;
+}
+
+function validateOrder(data) {
+  var errors = [];
+  if (!data.deliveryDate) errors.push("วันที่ส่ง");
+  if (!data.paymentDate)  errors.push("Payment Date");
+  if (!data.customerName) errors.push("ลูกค้า");
+  if (!data.channel)      errors.push("Channel");
+  if (!data.orderType)    errors.push("Order Type");
+  if (!data.tableName)    errors.push("Table");
+  if (!data.items||data.items.length===0) errors.push("รายการ");
+  if (!data.grandTotal)   errors.push("รวมทั้งหมด");
+  return errors;
+}
+
+// ============================================================
+//  WEEKLY PUSH SUMMARY
+// ============================================================
+function weeklyPushSummary() {
+  var today   = getTodayTH();
+  var dayData = [];
+  for (var i=0; i<7; i++) {
+    var d      = addDaysTH(today, i);
+    var rows   = getOrderRows(function(r) { return formatDateTH(r.deliveryDate) === d && !isRowCancelled(r); });
+    var orders = groupRowsByOrder(rows);
+    var totalQty = 0;
+    rows.forEach(function(r) { totalQty += toNumber(r.qty); });
+    if (orders.length > 0) dayData.push("📅 "+d+": "+orders.length+" ออเดอร์ / "+totalQty+" ชิ้น");
+  }
+  var msg = "📊 สรุปแผนสัปดาห์นี้\n"+today+" เป็นต้นไป\n\n";
+  msg += dayData.length === 0 ? "ไม่มีออเดอร์ในสัปดาห์นี้" : dayData.join("\n");
+  msg += "\n\nพิมพ์ \"summary 7\" เพื่อดูรายละเอียดค่ะ 🐔";
+  ADMIN_USER_IDS.forEach(function(uid) {
+    try {
+      UrlFetchApp.fetch("https://api.line.me/v2/bot/message/push",{method:"post",headers:{"Authorization":"Bearer "+LINE_CHANNEL_ACCESS_TOKEN,"Content-Type":"application/json"},payload:JSON.stringify({to:uid,messages:[{type:"text",text:msg}]}),muteHttpExceptions:true});
+    } catch(e){Logger.log("Push error: "+e);}
+  });
+}
+
+// ============================================================
+//  doPost — PRODUCTION VERSION
+// ============================================================
+function doPost(e) {
+  var replyToken = null;
+  try {
+    var json = JSON.parse(e.postData.contents);
+    if (!json.events || json.events.length === 0)
+      return ContentService.createTextOutput("No events");
+
+    for (var ei=0; ei<json.events.length; ei++) {
+      var event = json.events[ei];
+      replyToken = event.replyToken;
+
+      if (event.type === "postback") {
+        handlePostbackEvent(event);
+        continue;
+      }
+
+      if (event.type !== "message" || event.message.type !== "text") continue;
+
+      var messageId  = event.message.id;
+      var source     = event.source || {};
+      var sourceType = source.type || "";
+
+      if (isDuplicate(messageId)) continue;
+
+      var text = event.message.text.trim();
+
+      if (sourceType === "group" || sourceType === "room") {
+        if (isStopWakeWord(text)) { disableGroupStandby(source); continue; }
+        if (isWakeWordOnly(text)) {
+          enableGroupStandby(source, GROUP_STANDBY_MINUTES);
+          replyLine(replyToken, "🐔 ไก่จ๋ารับฟังอยู่ค่ะ ("+GROUP_STANDBY_MINUTES+" นาที)\nพิมพ์ \"ปิดไก่จ๋า\" เมื่อเสร็จ");
+          continue;
+        }
+        if (startsWithWakeWord(text)) {
+          text = stripWakeWord(text);
+          enableGroupStandby(source, GROUP_STANDBY_MINUTES);
+        } else if (!isGroupStandbyActive(source)) {
+          continue;
+        }
+      }
+
+      var resolvedText  = resolveAlias(text);
+      var effectiveText = (resolvedText && resolvedText.toLowerCase() !== text.toLowerCase()) ? resolvedText : text;
+
+      var adminHandled = handleAdminCommand(effectiveText, replyToken);
+      if (adminHandled) continue;
+
+      var customerHandled = handleCustomerMessage(event, effectiveText);
+      if (customerHandled) continue;
+
+      var isOrderLike = /รายการ\s*:/i.test(text)      ||
+                        /รวมทั้งหมด\s*:/i.test(text)   ||
+                        /ลูกค้า.*ชื่อคนรับ\s*:/i.test(text) ||
+                        /วันที่ส่ง\s*:/i.test(text);
+
+      if (isOrderLike) {
+        try {
+          var orderData = parseOrder(text);
+          var errors    = validateOrder(orderData);
+          if (errors.length > 0) {
+            replyFlexWithQuickReply(replyToken, buildErrorFlex(errors), QR_NO_ORDERS);
+          } else {
+            var newOrderId = saveToSheet(orderData, text);
+            clearSheetCache();
+            replyFlexWithQuickReply(replyToken, buildSuccessFlex(orderData, newOrderId), qrAfterSave(newOrderId));
+          }
+        } catch (err) {
+          replyLine(replyToken, "❌ เกิดข้อผิดพลาด: " + err.message);
+        }
+        continue;
+      }
+
+      var suggestion = buildAutoSuggest(text);
+      if (suggestion) {
+        replyLineWithQuickReply(replyToken, suggestion, QR_MAIN);
+        continue;
+      }
+
+      replyFlexWithQuickReply(replyToken, buildNotFoundFlex(), QR_MAIN);
+    }
+
+    return ContentService.createTextOutput("OK");
+
+  } catch (error) {
+    Logger.log("doPost ERROR: " + error.message + "\n" + error.stack);
+    if (replyToken) {
+      try { replyLine(replyToken, "❌ ระบบขัดข้อง: " + error.message.substring(0,200)); } catch(e2){}
+    }
+    return ContentService.createTextOutput("Error: " + error.message);
+  }
+}
+
+// ============================================================
+//  CONFIG — Customer-Facing
+// ============================================================
+var MENU_SHEET_NAME     = "Menu";
+var CUSTOMER_SHEET_NAME = "Customers";
+
+var ORDER_STATUS = {
+  PENDING:     "⏳ รอยืนยัน",
+  CONFIRMED:   "✅ ยืนยันแล้ว",
+  PREPARING:   "🍰 กำลังทำ",
+  READY:       "📦 พร้อมส่ง",
+  DELIVERING:  "🚗 กำลังจัดส่ง",
+  COMPLETED:   "✅ ส่งแล้ว",
+  CANCELLED:   "❌ ยกเลิก"
+};
+
+var REMINDER_MESSAGES = {
+  PAYMENT:         "💳 รบกวนชำระเงินภายใน {hours} ชม. นะคะ\nหากไม่ชำระตามกำหนด ออเดอร์จะถูกยกเลิกอัตโนมัติค่ะ 🙏",
+  PICKUP_TOMORROW: "📅 พรุ่งนี้รับเค้กนะคะ!\nOrder: {orderId}\n🕐 เวลา: {time}\n📍 สถานที่: {location}",
+  READY:           "🎉 เค้กพร้อมรับแล้วค่ะ!\nOrder: {orderId}\nรบกวนมารับภายในเวลาที่นัดไว้นะคะ",
+  REVIEW:          "💕 ขอบคุณที่อุดหนุนนะคะ!\nรบกวนรีวิวให้ไก่จ๋าหน่อยนะคะ 🐔"
+};
+
+var BANK_INFO = {
+  bankName:      "กสิกรไทย",
+  accountNumber: "xxx-x-xxxxx-x",
+  accountName:   "ร้านไก่จ๋าเค้ก"
+};
+
+// ============================================================
+//  RICH MENU SETUP
+// ============================================================
+function setupRichMenu() {
+  var richMenuBody = {
+    size: { width: 2500, height: 843 },
+    selected: true,
+    name: "ไก่จ๋า Main Menu",
+    chatBarText: "เมนูหลัก 🐔",
+    areas: [
+      { bounds:{x:0,y:0,width:833,height:421},    action:{type:"message",text:"ดูเมนูเค้ก"} },
+      { bounds:{x:833,y:0,width:834,height:421},   action:{type:"message",text:"สั่งเค้ก"} },
+      { bounds:{x:1667,y:0,width:833,height:421},  action:{type:"message",text:"เช็คสถานะ"} },
+      { bounds:{x:0,y:421,width:833,height:422},   action:{type:"message",text:"แจ้งโอนเงิน"} },
+      { bounds:{x:833,y:421,width:834,height:422}, action:{type:"message",text:"โปรโมชัน"} },
+      { bounds:{x:1667,y:421,width:833,height:422},action:{type:"message",text:"ติดต่อร้าน"} }
+    ]
+  };
+  var res = UrlFetchApp.fetch("https://api.line.me/v2/bot/richmenu",{method:"post",headers:{"Authorization":"Bearer "+LINE_CHANNEL_ACCESS_TOKEN,"Content-Type":"application/json"},payload:JSON.stringify(richMenuBody),muteHttpExceptions:true});
+  var result = JSON.parse(res.getContentText());
+  Logger.log("Rich Menu created: "+result.richMenuId);
+  if (result.richMenuId) {
+    UrlFetchApp.fetch("https://api.line.me/v2/bot/user/all/richmenu/"+result.richMenuId,{method:"post",headers:{"Authorization":"Bearer "+LINE_CHANNEL_ACCESS_TOKEN},muteHttpExceptions:true});
+    Logger.log("Set as default rich menu");
+  }
+  return result.richMenuId;
+}
+
+// ============================================================
+//  FLEX — Customer Facing (เหมือนเดิม - ย่อเพื่อ readability)
+// ============================================================
+function buildCustomerOrderConfirmFlex(data, orderId) {
+  var itemRows = data.items.map(function(item) {
+    return {
+      type:"box",layout:"horizontal",margin:"sm",
+      contents:[
+        {type:"text",text:"• "+item.menuName,size:"sm",color:"#555555",flex:3,wrap:true},
+        {type:"text",text:item.quantity+" "+(item.unit||"ชิ้น"),size:"sm",color:"#888888",flex:1,align:"center"},
+        {type:"text",text:(item.itemTotal||0).toLocaleString()+"฿",size:"sm",color:"#333333",flex:2,align:"end",weight:"bold"}
+      ]
+    };
+  });
+  return {
+    type:"flex",altText:"✅ ออเดอร์ "+orderId+" | "+data.customerName+" | "+data.grandTotal.toLocaleString()+"฿",
+    contents:{type:"bubble",size:"kilo",
+      header:{type:"box",layout:"vertical",backgroundColor:"#0D8745",paddingAll:"16px",contents:[
+        {type:"text",text:"🧾 ยืนยันออเดอร์",size:"xs",color:"#C8E6C9",weight:"bold"},
+        {type:"text",text:data.customerName,size:"xl",color:"#FFFFFF",weight:"bold",wrap:true},
+        {type:"text",text:"📅 วันที่ส่ง: "+data.deliveryDate,size:"xs",color:"#A5D6A7",margin:"sm"}
+      ]},
+      body:{type:"box",layout:"vertical",paddingAll:"16px",spacing:"md",contents:[
+        {type:"box",layout:"horizontal",contents:[{type:"text",text:"Order ID",size:"xs",color:"#AAAAAA",flex:2},{type:"text",text:orderId,size:"xs",color:"#0D8745",flex:3,align:"end",weight:"bold"}]},
+        data.deliveryTime?{type:"box",layout:"horizontal",contents:[{type:"text",text:"⏰ เวลาส่ง",size:"sm",color:"#555555",flex:2},{type:"text",text:String(data.deliveryTime),size:"sm",color:"#333333",flex:3,align:"end"}]}:null,
+        data.location?{type:"box",layout:"horizontal",contents:[{type:"text",text:"📍 สถานที่",size:"sm",color:"#555555",flex:2},{type:"text",text:String(data.location),size:"sm",color:"#333333",flex:3,align:"end",wrap:true}]}:null,
+        {type:"separator",margin:"md"}
+      ].concat(itemRows).concat([
+        data.deliveryFee>0?{type:"box",layout:"horizontal",margin:"sm",contents:[{type:"text",text:"🚚 ค่าส่ง",size:"sm",color:"#888888",flex:3},{type:"text",text:data.deliveryFee.toLocaleString()+"฿",size:"sm",color:"#888888",flex:2,align:"end"}]}:null,
+        {type:"separator",margin:"md"},
+        {type:"box",layout:"horizontal",backgroundColor:"#E8F5E9",paddingAll:"12px",cornerRadius:"8px",contents:[
+          {type:"text",text:"💰 ยอดรวม",size:"lg",weight:"bold",color:"#2E7D32",flex:3},
+          {type:"text",text:data.grandTotal.toLocaleString()+" บาท",size:"lg",weight:"bold",color:"#0D8745",flex:3,align:"end"}
+        ]},
+        {type:"box",layout:"vertical",margin:"lg",paddingAll:"12px",backgroundColor:"#FFF3E0",cornerRadius:"8px",contents:[
+          {type:"text",text:"💳 ชำระเงิน",size:"sm",weight:"bold",color:"#E65100"},
+          {type:"text",text:BANK_INFO.bankName,size:"sm",color:"#555555",margin:"xs"},
+          {type:"text",text:BANK_INFO.accountNumber,size:"md",weight:"bold",color:"#333333",margin:"xs"},
+          {type:"text",text:BANK_INFO.accountName,size:"xs",color:"#888888"}
+        ]}
+      ]).filter(Boolean)},
+      footer:{type:"box",layout:"vertical",spacing:"sm",paddingAll:"12px",contents:[
+        {type:"button",style:"primary",color:"#0D8745",height:"sm",action:{type:"postback",label:"📸 แจ้งโอนเงิน",data:"action=payment&orderId="+orderId}},
+        {type:"box",layout:"horizontal",spacing:"sm",contents:[
+          {type:"button",style:"secondary",height:"sm",flex:1,action:{type:"postback",label:"📋 เช็คสถานะ",data:"action=status&orderId="+orderId}},
+          {type:"button",style:"secondary",height:"sm",flex:1,action:{type:"postback",label:"❌ ยกเลิก",data:"action=cancel_request&orderId="+orderId}}
+        ]}
+      ]}
+    }
+  };
+}
+
+function buildPaymentReminderFlex(orderId, customerName, grandTotal, hoursLeft) {
+  var urgencyColor = hoursLeft<=1?"#D32F2F":hoursLeft<=6?"#FF6F00":"#FF9800";
+  var urgencyText  = hoursLeft<=1?"⚠️ ใกล้หมดเวลา!":hoursLeft<=6?"⏰ เหลือเวลาอีก "+hoursLeft+" ชม.":"💳 รอชำระเงิน";
+  return {
+    type:"flex",altText:"💳 รบกวนชำระเงิน "+orderId+" | "+grandTotal.toLocaleString()+" บาท",
+    contents:{type:"bubble",size:"kilo",
+      header:{type:"box",layout:"vertical",backgroundColor:urgencyColor,paddingAll:"16px",contents:[{type:"text",text:urgencyText,size:"sm",color:"#FFFFFF",weight:"bold"},{type:"text",text:"🐔 ไก่ทวงเบาๆ ค่ะ",size:"lg",color:"#FFFFFF",weight:"bold",margin:"xs"}]},
+      body:{type:"box",layout:"vertical",paddingAll:"16px",spacing:"md",contents:[
+        {type:"box",layout:"horizontal",contents:[{type:"text",text:"Order",size:"sm",color:"#888888",flex:2},{type:"text",text:orderId,size:"sm",color:urgencyColor,flex:3,align:"end",weight:"bold"}]},
+        {type:"box",layout:"horizontal",contents:[{type:"text",text:"ลูกค้า",size:"sm",color:"#888888",flex:2},{type:"text",text:customerName,size:"sm",color:"#333333",flex:3,align:"end"}]},
+        {type:"separator"},
+        {type:"box",layout:"horizontal",backgroundColor:"#FFF3E0",paddingAll:"12px",cornerRadius:"8px",contents:[{type:"text",text:"💰 ยอดชำระ",size:"md",weight:"bold",color:"#333333",flex:3},{type:"text",text:grandTotal.toLocaleString()+" บาท",size:"md",weight:"bold",color:urgencyColor,flex:3,align:"end"}]},
+        {type:"separator"},
+        {type:"box",layout:"vertical",paddingAll:"12px",backgroundColor:"#F5F5F5",cornerRadius:"8px",contents:[{type:"text",text:"🏦 บัญชีโอนเงิน",size:"sm",weight:"bold",color:"#333333"},{type:"text",text:BANK_INFO.bankName+" "+BANK_INFO.accountNumber,size:"sm",color:"#555555",margin:"xs"},{type:"text",text:BANK_INFO.accountName,size:"xs",color:"#888888"}]}
+      ]},
+      footer:{type:"box",layout:"horizontal",spacing:"sm",paddingAll:"12px",contents:[
+        {type:"button",style:"primary",color:"#0D8745",height:"sm",flex:1,action:{type:"postback",label:"📸 แจ้งโอน",data:"action=payment&orderId="+orderId}},
+        {type:"button",style:"secondary",height:"sm",flex:1,action:{type:"postback",label:"💬 ติดต่อร้าน",data:"action=contact"}}
+      ]}
+    }
+  };
+}
+
+function buildOrderStatusFlex(orderId, customerName, deliveryDate, currentStatus) {
+  var steps = [
+    {key:ORDER_STATUS.CONFIRMED,  icon:"✅",label:"ยืนยันแล้ว"},
+    {key:ORDER_STATUS.PREPARING,  icon:"🍰",label:"กำลังทำ"},
+    {key:ORDER_STATUS.READY,      icon:"📦",label:"พร้อมส่ง"},
+    {key:ORDER_STATUS.DELIVERING, icon:"🚗",label:"กำลังจัดส่ง"},
+    {key:ORDER_STATUS.COMPLETED,  icon:"🎉",label:"ส่งแล้ว"}
+  ];
+  var reachedCurrent = false;
+  var timelineRows = steps.map(function(step) {
+    var isActive = false;
+    if (!reachedCurrent) { isActive=true; if(step.key===currentStatus) reachedCurrent=true; }
+    var dotColor=isActive?"#0D8745":"#E0E0E0", textColor=isActive?"#333333":"#BDBDBD", lineColor=isActive?"#0D8745":"#E0E0E0";
+    return {type:"box",layout:"horizontal",spacing:"md",margin:"md",contents:[
+      {type:"box",layout:"vertical",width:"30px",alignItems:"center",contents:[
+        {type:"box",layout:"vertical",width:"16px",height:"16px",cornerRadius:"8px",backgroundColor:dotColor,contents:[{type:"filler"}]},
+        {type:"box",layout:"vertical",width:"2px",height:"24px",backgroundColor:lineColor,contents:[{type:"filler"}]}
+      ]},
+      {type:"box",layout:"vertical",flex:1,contents:[
+        {type:"text",text:step.icon+" "+step.label,size:"sm",color:textColor,weight:step.key===currentStatus?"bold":"regular"},
+        step.key===currentStatus?{type:"text",text:"← ตอนนี้",size:"xxs",color:"#0D8745",weight:"bold"}:{type:"filler"}
+      ]}
+    ]};
+  });
+  return {
+    type:"flex",altText:"📋 สถานะ "+orderId+" | "+currentStatus,
+    contents:{type:"bubble",size:"kilo",
+      header:{type:"box",layout:"vertical",backgroundColor:"#1565C0",paddingAll:"16px",contents:[{type:"text",text:"📋 สถานะออเดอร์",size:"xs",color:"#BBDEFB",weight:"bold"},{type:"text",text:orderId,size:"lg",color:"#FFFFFF",weight:"bold"},{type:"text",text:customerName+" | "+deliveryDate,size:"xs",color:"#90CAF9",margin:"xs"}]},
+      body:{type:"box",layout:"vertical",paddingAll:"16px",contents:
+        timelineRows.concat([
+        {type:"box",layout:"vertical",margin:"lg",paddingAll:"12px",backgroundColor:"#E3F2FD",cornerRadius:"8px",contents:[{type:"text",text:"สถานะปัจจุบัน: "+currentStatus,size:"sm",weight:"bold",color:"#1565C0",wrap:true}]}
+      ])},
+      footer:{type:"box",layout:"horizontal",spacing:"sm",paddingAll:"12px",contents:[
+        {type:"button",style:"primary",color:"#1565C0",height:"sm",flex:1,action:{type:"postback",label:"🔄 Refresh",data:"action=status&orderId="+orderId}},
+        {type:"button",style:"secondary",height:"sm",flex:1,action:{type:"postback",label:"💬 ติดต่อร้าน",data:"action=contact"}}
+      ]}
+    }
+  };
+}
+
+function buildCakeMenuCarousel() {
+  var menuData = getCakeMenuData();
+  if (menuData.length === 0) return null;
+  var bubbles = menuData.slice(0,10).map(function(cake) {
+    var badgeColor = cake.badge==="ยอดนิยม"?"#FF6B6B":cake.badge==="ใหม่"?"#4CAF50":cake.badge==="แนะนำ"?"#FF9800":null;
+    var bodyContents = [
+      {type:"text",text:cake.name,weight:"bold",size:"md",wrap:true},
+      {type:"text",text:cake.category||"เค้ก",size:"xs",color:"#888888",margin:"xs"},
+      {type:"box",layout:"horizontal",margin:"md",contents:[
+        {type:"text",text:"฿"+cake.price.toLocaleString(),size:"xl",weight:"bold",color:"#0D8745"},
+        badgeColor?{type:"box",layout:"vertical",alignItems:"center",justifyContent:"center",backgroundColor:badgeColor,cornerRadius:"12px",paddingAll:"4px",width:"72px",height:"24px",contents:[{type:"text",text:cake.badge,size:"xxs",color:"#FFFFFF",weight:"bold"}]}:{type:"filler"}
+      ]}
+    ];
+    if (cake.description) bodyContents.push({type:"text",text:cake.description,size:"xs",color:"#666666",margin:"md",wrap:true,maxLines:2});
+    var bubble = {
+      type:"bubble",size:"kilo",
+      body:{type:"box",layout:"vertical",paddingAll:"16px",spacing:"sm",contents:bodyContents},
+      footer:{type:"box",layout:"vertical",spacing:"sm",paddingAll:"12px",contents:[
+        {type:"button",style:"primary",color:"#0D8745",height:"sm",action:{type:"postback",label:"🛒 สั่ง "+cake.name.substring(0,14),data:"action=order_menu&menuId="+cake.id+"&menuName="+encodeURIComponent(cake.name)+"&price="+cake.price}}
+      ]}
+    };
+    if (cake.imageUrl) {
+      bubble.hero = {type:"image",url:cake.imageUrl,size:"full",aspectRatio:"4:3",aspectMode:"cover"};
+    }
+    return bubble;
+  });
+  return {type:"flex",altText:"🍰 เมนูเค้กไก่จ๋า ("+menuData.length+" รายการ)",contents:{type:"carousel",contents:bubbles}};
+}
+
+function buildPromoFlex() {
+  return {type:"flex",altText:"🎉 โปรโมชันร้านไก่จ๋า",
+    contents:{type:"bubble",size:"kilo",
+      header:{type:"box",layout:"vertical",backgroundColor:"#FF6B6B",paddingAll:"16px",contents:[{type:"text",text:"🎉 โปรโมชัน",size:"xs",color:"#FFE0E0",weight:"bold"},{type:"text",text:"ไก่จ๋าเค้ก",size:"xl",color:"#FFFFFF",weight:"bold"}]},
+      body:{type:"box",layout:"vertical",paddingAll:"16px",spacing:"md",contents:[
+        {type:"box",layout:"vertical",paddingAll:"12px",backgroundColor:"#FFF3E0",cornerRadius:"8px",contents:[{type:"text",text:"🍰 สั่งครบ 3 ชิ้น ลด 10%",size:"sm",weight:"bold",color:"#E65100"},{type:"text",text:"เฉพาะสั่งผ่าน LINE เท่านั้น",size:"xs",color:"#888888",margin:"xs"}]},
+        {type:"box",layout:"vertical",paddingAll:"12px",backgroundColor:"#E8F5E9",cornerRadius:"8px",contents:[{type:"text",text:"🎂 เค้กวันเกิด ฟรีเทียน + การ์ด",size:"sm",weight:"bold",color:"#2E7D32"},{type:"text",text:"แจ้งล่วงหน้า 3 วัน",size:"xs",color:"#888888",margin:"xs"}]},
+        {type:"box",layout:"vertical",paddingAll:"12px",backgroundColor:"#E3F2FD",cornerRadius:"8px",contents:[{type:"text",text:"🚗 ส่งฟรี! สั่งครบ 500 บาท",size:"sm",weight:"bold",color:"#1565C0"},{type:"text",text:"เขตกรุงเทพฯ และปริมณฑล",size:"xs",color:"#888888",margin:"xs"}]}
+      ]},
+      footer:{type:"box",layout:"horizontal",spacing:"sm",paddingAll:"12px",contents:[
+        {type:"button",style:"primary",color:"#FF6B6B",height:"sm",flex:1,action:{type:"message",label:"🍰 ดูเมนู",text:"ดูเมนูเค้ก"}},
+        {type:"button",style:"primary",color:"#0D8745",height:"sm",flex:1,action:{type:"message",label:"🛒 สั่งเลย",text:"สั่งเค้ก"}}
+      ]}
+    }
+  };
+}
+
+// ============================================================
+//  QUICK REPLY — Customer
+// ============================================================
+var QR_CUSTOMER_MAIN = [
+  {label:"🍰 ดูเมนู",   text:"ดูเมนูเค้ก"},
+  {label:"🛒 สั่งเค้ก",  text:"สั่งเค้ก"},
+  {label:"📋 เช็คสถานะ",text:"เช็คสถานะ"},
+  {label:"💳 แจ้งโอน",   text:"แจ้งโอนเงิน"},
+  {label:"📞 ติดต่อร้าน",text:"ติดต่อร้าน"}
+];
+var QR_ORDER_GUIDE = [
+  {label:"📅 วันนี้",    text:"วันนี้"},
+  {label:"📅 พรุ่งนี้",  text:"พรุ่งนี้"},
+  {label:"📅 เลือกวัน",  text:"เลือกวันที่"},
+  {label:"❌ ยกเลิก",    text:"ยกเลิกการสั่ง"}
+];
+var QR_DELIVERY_TYPE = [
+  {label:"🚗 Delivery",text:"Delivery"},
+  {label:"🏪 Pickup",  text:"Pickup"},
+  {label:"❌ ยกเลิก",  text:"ยกเลิกการสั่ง"}
+];
+
+function buildQuickReplyItems(items) {
+  return items.map(function(item) {
+    if (typeof item === "string")
+      return {type:"action",action:{type:"message",label:item.substring(0,20),text:item}};
+    if (item.postback)
+      return {type:"action",action:{type:"postback",label:String(item.label).substring(0,20),data:item.postback}};
+    return {type:"action",action:{type:"message",label:String(item.label).substring(0,20),text:item.text||item.label}};
+  });
+}
+
+function replyWithCustomerQuickReply(replyToken, message, quickReplyItems) {
+  var payload = {
+    replyToken: replyToken,
+    messages: [{
+      type: typeof message === "string" ? "text" : "flex",
+      quickReply: {items: buildQuickReplyItems(quickReplyItems)}
+    }]
+  };
+  if (typeof message === "string") {
+    payload.messages[0].text = String(message).substring(0,5000);
+  } else {
+    Object.assign(payload.messages[0], message);
+  }
+  UrlFetchApp.fetch("https://api.line.me/v2/bot/message/reply",{method:"post",headers:{"Authorization":"Bearer "+LINE_CHANNEL_ACCESS_TOKEN,"Content-Type":"application/json"},payload:JSON.stringify(payload),muteHttpExceptions:true});
+}
+
+function replyFlexWithCustomerQR(replyToken, flexPayload, quickReplyItems) {
+  var message = Object.assign({}, flexPayload, {quickReply:{items:buildQuickReplyItems(quickReplyItems)}});
+  UrlFetchApp.fetch("https://api.line.me/v2/bot/message/reply",{method:"post",headers:{"Authorization":"Bearer "+LINE_CHANNEL_ACCESS_TOKEN,"Content-Type":"application/json"},payload:JSON.stringify({replyToken:replyToken,messages:[message]}),muteHttpExceptions:true});
+}
+
+// ============================================================
+//  POSTBACK HANDLER
+// ============================================================
+function handlePostbackEvent(event) {
+  var data       = event.postback ? event.postback.data : "";
+  var replyToken = event.replyToken;
+  var userId     = event.source ? event.source.userId : "";
+  var params     = parsePostbackData(data);
+
+  switch (params.action) {
+    case "order_menu":      startOrderFromMenu(replyToken, userId, params);             return true;
+    case "payment":         handlePaymentNotify(replyToken, userId, params.orderId);    return true;
+    case "status":          handleCheckStatus(replyToken, userId, params.orderId);      return true;
+    case "cancel_request":  handleCustomerCancelRequest(replyToken, userId, params.orderId); return true;
+    case "contact":
+      replyWithCustomerQuickReply(replyToken,"📞 ติดต่อร้านไก่จ๋า\n\nพิมพ์ข้อความได้เลยค่ะ แอดมินจะตอบกลับเร็วที่สุดนะคะ 🐔\n\n⏰ เวลาทำการ: 09:00 - 20:00",QR_CUSTOMER_MAIN);
+      return true;
+    default: return false;
+  }
+}
+
+function parsePostbackData(dataStr) {
+  var params = {};
+  String(dataStr||"").split("&").forEach(function(pair) {
+    var parts = pair.split("=");
+    if (parts[0]) params[parts[0]] = decodeURIComponent(parts[1]||"");
+  });
+  return params;
+}
+
+function startOrderFromMenu(replyToken, userId, params) {
+  var menuName = params.menuName || "เค้ก";
+  var price    = params.price || "0";
+  setUserState(userId, {step:"ORDER_QTY", menuName:menuName, price:parseInt(price), items:[]});
+  replyWithCustomerQuickReply(replyToken,
+    "🍰 "+menuName+" ("+parseInt(price).toLocaleString()+"฿/ชิ้น)\n\nต้องการกี่ชิ้นคะ?",
+    [{label:"1 ชิ้น",text:"1"},{label:"2 ชิ้น",text:"2"},{label:"3 ชิ้น",text:"3"},{label:"5 ชิ้น",text:"5"},{label:"❌ ยกเลิก",text:"ยกเลิกการสั่ง"}]
+  );
+}
+
+function handlePaymentNotify(replyToken, userId, orderId) {
+  if (orderId) {
+    replyWithCustomerQuickReply(replyToken,"📸 แจ้งโอนเงิน Order: "+orderId+"\n\nส่งรูปสลิปมาได้เลยค่ะ\nแอดมินจะตรวจสอบและยืนยันให้นะคะ 🐔",QR_CUSTOMER_MAIN);
+  } else {
+    replyWithCustomerQuickReply(replyToken,"📸 แจ้งโอนเงิน\n\nกรุณาพิมพ์ Order ID ที่ต้องการแจ้งโอนค่ะ\nตัวอย่าง: ORD-13042569-003427",QR_CUSTOMER_MAIN);
+  }
+}
+
+function handleCheckStatus(replyToken, userId, orderId) {
+  if (orderId) {
+    var rows = getOrderRows(function(r){ return r.orderId.toLowerCase()===orderId.toLowerCase(); });
+    var mainRows = rows.filter(function(r){ return r.grandTotal!=="" && r.grandTotal!==null && toNumber(r.grandTotal)>0; });
+    if (mainRows.length > 0 || rows.length > 0) {
+      var main   = mainRows[0] || rows[0];
+      var status = getOrderStatus(orderId) || ORDER_STATUS.CONFIRMED;
+      replyFlexWithCustomerQR(replyToken, buildOrderStatusFlex(orderId,main.customerName,formatDateTH(main.deliveryDate),status), QR_CUSTOMER_MAIN);
+    } else {
+      replyWithCustomerQuickReply(replyToken,"❌ ไม่พบ Order: "+orderId+"\nกรุณาตรวจสอบ Order ID อีกครั้งค่ะ",QR_CUSTOMER_MAIN);
+    }
+  } else {
+    var customerOrders = getCustomerLatestOrders(userId, 3);
+    if (customerOrders.length > 0) {
+      var qrItems = customerOrders.map(function(o){return {label:o.orderId.substring(0,20),postback:"action=status&orderId="+o.orderId};});
+      qrItems.push({label:"🏠 เมนูหลัก",text:"เมนู"});
+      replyWithCustomerQuickReply(replyToken,"📋 เลือกออเดอร์ที่ต้องการเช็คสถานะค่ะ",qrItems);
+    } else {
+      replyWithCustomerQuickReply(replyToken,"📋 กรุณาพิมพ์ Order ID ที่ต้องการเช็คค่ะ\nตัวอย่าง: ORD-13042569-003427",QR_CUSTOMER_MAIN);
+    }
+  }
+}
+
+function handleCustomerCancelRequest(replyToken, userId, orderId) {
+  var status = getOrderStatus(orderId);
+  if (status===ORDER_STATUS.PREPARING || status===ORDER_STATUS.READY) {
+    replyWithCustomerQuickReply(replyToken,"⚠️ ขออภัยค่ะ ออเดอร์ "+orderId+" อยู่ในขั้นตอน "+status+" แล้ว\nไม่สามารถยกเลิกได้ค่ะ\n\nกรุณาติดต่อร้านโดยตรงนะคะ 🙏",[{label:"💬 ติดต่อร้าน",postback:"action=contact"}].concat(QR_CUSTOMER_MAIN));
+  } else {
+    notifyAdminCancelRequest(orderId, userId);
+    replyWithCustomerQuickReply(replyToken,"📩 ส่งคำขอยกเลิก "+orderId+" แล้วค่ะ\nแอดมินจะตรวจสอบและแจ้งกลับภายใน 30 นาทีนะคะ 🐔",QR_CUSTOMER_MAIN);
+  }
+}
+
+// ============================================================
+//  PUSH NOTIFICATIONS
+// ============================================================
+function pushPaymentReminders() {
+  var pendingOrders = getOrderRows(function(r) {
+    var status = getOrderStatusFromRow(r);
+    return status===ORDER_STATUS.PENDING && r.grandTotal!=="" && r.grandTotal!==null && toNumber(r.grandTotal)>0;
+  });
+  var orders = groupRowsByOrder(pendingOrders);
+  orders.forEach(function(o) {
+    var main       = o.rows[0];
+    var customerId = getCustomerIdByName(main.customerName);
+    if (!customerId) return;
+    pushFlexMessage(customerId, buildPaymentReminderFlex(o.orderId,main.customerName,toNumber(main.grandTotal),12));
+  });
+  Logger.log("Sent "+orders.length+" payment reminders");
+}
+
+function pushPickupReminders() {
+  var tomorrowTH = getTomorrowTH();
+  var rows = getOrderRows(function(r){ return formatDateTH(r.deliveryDate)===tomorrowTH&&r.grandTotal!==""&&r.grandTotal!==null&&!isRowCancelled(r); });
+  var orders = groupRowsByOrder(rows);
+  orders.forEach(function(o) {
+    var main       = o.rows[0];
+    var customerId = getCustomerIdByName(main.customerName);
+    if (!customerId) return;
+    var timeStr = formatTimeTH(main.deliveryTime);
+    var msg = REMINDER_MESSAGES.PICKUP_TOMORROW
+      .replace("{orderId}", o.orderId)
+      .replace("{time}",    timeStr||"ตามนัดหมาย")
+      .replace("{location}",main.location||"ร้านไก่จ๋า");
+    pushTextMessage(customerId, msg);
+  });
+  Logger.log("Sent "+orders.length+" pickup reminders");
+}
+
+function pushReadyNotification(orderId) {
+  var rows = getOrderRows(function(r){ return r.orderId===orderId; });
+  var mainRows = rows.filter(function(r){ return r.grandTotal!=="" && r.grandTotal!==null && toNumber(r.grandTotal)>0; });
+  if (mainRows.length === 0 && rows.length === 0) return;
+  var customerId = getCustomerIdByName((mainRows[0]||rows[0]).customerName);
+  if (!customerId) return;
+  pushTextMessage(customerId, REMINDER_MESSAGES.READY.replace("{orderId}",orderId));
+}
+
+function pushReviewRequests() {
+  var yesterdayTH = addDaysTH(getTodayTH(),-1);
+  var rows = getOrderRows(function(r){ return formatDateTH(r.deliveryDate)===yesterdayTH&&r.grandTotal!==""&&r.grandTotal!==null&&getOrderStatusFromRow(r)===ORDER_STATUS.COMPLETED; });
+  var orders = groupRowsByOrder(rows);
+  orders.forEach(function(o) {
+    var customerId = getCustomerIdByName(o.rows[0].customerName);
+    if (!customerId) return;
+    pushTextMessage(customerId, REMINDER_MESSAGES.REVIEW);
+  });
+  Logger.log("Sent "+orders.length+" review requests");
+}
+
+function pushTextMessage(userId, text) {
+  try {
+    UrlFetchApp.fetch("https://api.line.me/v2/bot/message/push",{method:"post",headers:{"Authorization":"Bearer "+LINE_CHANNEL_ACCESS_TOKEN,"Content-Type":"application/json"},payload:JSON.stringify({to:userId,messages:[{type:"text",text:String(text).substring(0,5000)}]}),muteHttpExceptions:true});
+  } catch(e){Logger.log("Push error: "+e);}
+}
+
+function pushFlexMessage(userId, flexPayload) {
+  try {
+    UrlFetchApp.fetch("https://api.line.me/v2/bot/message/push",{method:"post",headers:{"Authorization":"Bearer "+LINE_CHANNEL_ACCESS_TOKEN,"Content-Type":"application/json"},payload:JSON.stringify({to:userId,messages:[flexPayload]}),muteHttpExceptions:true});
+  } catch(e){Logger.log("Push error: "+e);}
+}
+
+// ============================================================
+//  CUSTOMER ORDER FLOW
+// ============================================================
+function handleCustomerMessage(event, processedText) {
+  var text       = processedText !== undefined ? processedText : (event.message&&event.message.text?event.message.text.trim():"");
+  var replyToken = event.replyToken;
+  var userId     = event.source ? event.source.userId : "";
+  var lower      = text.toLowerCase();
+
+  if (lower==="ดูเมนูเค้ก"||lower==="เมนูเค้ก"||lower==="เมนู เค้ก"||lower==="menu") {
+    var menuFlex = buildCakeMenuCarousel();
+    if (menuFlex) replyFlexWithCustomerQR(replyToken, menuFlex, QR_CUSTOMER_MAIN);
+    else replyWithCustomerQuickReply(replyToken,"🍰 ยังไม่มีเมนูในระบบค่ะ\nกรุณาติดต่อร้านโดยตรงนะคะ",QR_CUSTOMER_MAIN);
+    return true;
+  }
+  if (lower==="สั่งเค้ก"||lower==="สั่ง"||lower==="order"||lower==="สั่งเลย") {
+    startGuidedOrderFlow(replyToken, userId); return true;
+  }
+  if (lower==="เช็คสถานะ"||lower==="สถานะ"||lower==="check status") {
+    handleCheckStatus(replyToken, userId, null); return true;
+  }
+  if (lower==="แจ้งโอนเงิน"||lower==="แจ้งโอน"||lower==="payment"||lower==="slip") {
+    handlePaymentNotify(replyToken, userId, null); return true;
+  }
+  if (lower==="โปรโมชัน"||lower==="promo"||lower==="โปรโมชั่น") {
+    replyFlexWithCustomerQR(replyToken, buildPromoFlex(), QR_CUSTOMER_MAIN); return true;
+  }
+  if (lower==="ติดต่อร้าน"||lower==="contact"||lower==="ติดต่อ") {
+    replyWithCustomerQuickReply(replyToken,"📞 ติดต่อร้านไก่จ๋า\n\nพิมพ์ข้อความได้เลยค่ะ แอดมินจะตอบกลับเร็วที่สุดนะคะ 🐔\n\n⏰ เวลาทำการ: 09:00 - 20:00",QR_CUSTOMER_MAIN); return true;
+  }
+  if (lower==="ยกเลิกการสั่ง"||lower==="cancel order") {
+    clearUserState(userId);
+    replyWithCustomerQuickReply(replyToken,"❌ ยกเลิกการสั่งแล้วค่ะ\nจะสั่งใหม่เมื่อไหร่ก็พิมพ์ 'สั่งเค้ก' ได้เลยนะคะ 🐔",QR_CUSTOMER_MAIN); return true;
+  }
+
+  var state = getUserState(userId);
+  if (state && state.step) return handleGuidedOrderStep(replyToken, userId, text, state);
+  return false;
+}
+
+function startGuidedOrderFlow(replyToken, userId) {
+  setUserState(userId, {step:"CHOOSE_MENU"});
+  var menuFlex = buildCakeMenuCarousel();
+  if (menuFlex) {
+    replyFlexWithCustomerQR(replyToken, menuFlex, [{label:"📋 พิมพ์เอง",text:"📋 คัดลอกฟอร์ม"},{label:"❌ ยกเลิก",text:"ยกเลิกการสั่ง"}]);
+  } else {
+    replyWithCustomerQuickReply(replyToken,"🍰 สั่งเค้กไก่จ๋า\n\nกรอกรายละเอียดออเดอร์ตามฟอร์มด้านล่างได้เลยค่ะ:\n\n"+getOrderFormTemplate(),[{label:"📋 คัดลอกฟอร์ม",text:"📋 คัดลอกฟอร์ม"},{label:"❌ ยกเลิก",text:"ยกเลิกการสั่ง"}]);
+    clearUserState(userId);
+  }
+}
+
+function handleGuidedOrderStep(replyToken, userId, text, state) {
+  switch (state.step) {
+    case "CHOOSE_MENU":
+      if (text.includes("คัดลอกฟอร์ม")) { clearUserState(userId); replyLine(replyToken, getOrderFormTemplate()); return true; }
+      return false;
+
+    case "ORDER_QTY":
+      var qty = parseInt(text);
+      if (isNaN(qty)||qty<=0||qty>100) {
+        replyWithCustomerQuickReply(replyToken,"⚠️ กรุณาระบุจำนวนเป็นตัวเลข (1-100) ค่ะ",[{label:"1 ชิ้น",text:"1"},{label:"2 ชิ้น",text:"2"},{label:"3 ชิ้น",text:"3"},{label:"❌ ยกเลิก",text:"ยกเลิกการสั่ง"}]);
+        return true;
+      }
+      state.items.push({menuName:state.menuName,quantity:qty,unitPrice:state.price,itemTotal:qty*state.price,unit:"ชิ้น"});
+      state.step = "ADD_MORE";
+      setUserState(userId, state);
+      replyWithCustomerQuickReply(replyToken,"✅ "+state.menuName+" x"+qty+" = "+(qty*state.price).toLocaleString()+"฿\n\nต้องการเพิ่มเมนูอื่นไหมคะ?",[{label:"➕ เพิ่มเมนู",text:"เพิ่มเมนู"},{label:"✅ พอแล้ว",text:"พอแล้ว"},{label:"❌ ยกเลิก",text:"ยกเลิกการสั่ง"}]);
+      return true;
+
+    case "ADD_MORE":
+      if (text==="เพิ่มเมนู"||text==="➕ เพิ่มเมนู") { state.step="CHOOSE_MENU"; setUserState(userId,state); startGuidedOrderFlow(replyToken,userId); return true; }
+      if (text==="พอแล้ว"||text==="✅ พอแล้ว") {
+        state.step="CUSTOMER_NAME"; setUserState(userId,state);
+        replyWithCustomerQuickReply(replyToken,"👤 ชื่อคนรับเค้กคะ? (พิมพ์ได้เลย)",[{label:"❌ ยกเลิก",text:"ยกเลิกการสั่ง"}]);
+        return true;
+      }
+      return false;
+
+    case "CUSTOMER_NAME":
+      state.customerName=text; state.step="PHONE"; setUserState(userId,state);
+      replyWithCustomerQuickReply(replyToken,"📞 เบอร์โทรติดต่อคะ?",[{label:"❌ ยกเลิก",text:"ยกเลิกการสั่ง"}]);
+      return true;
+
+    case "PHONE":
+      state.phone=text; state.step="DELIVERY_DATE"; setUserState(userId,state);
+      replyWithCustomerQuickReply(replyToken,"📅 วันที่ต้องการรับเค้กคะ?",QR_ORDER_GUIDE);
+      return true;
+
+    case "DELIVERY_DATE":
+      if (text==="วันนี้")       state.deliveryDate=getTodayTH();
+      else if (text==="พรุ่งนี้") state.deliveryDate=getTomorrowTH();
+      else if (text==="เลือกวันที่") {
+        replyWithCustomerQuickReply(replyToken,"📅 พิมพ์วันที่ในรูปแบบ dd/MM/พ.ศ.\nตัวอย่าง: 15/04/2569",[{label:"❌ ยกเลิก",text:"ยกเลิกการสั่ง"}]);
+        return true;
+      }
+      else state.deliveryDate = formatDateTH(text) || text;
+      state.step="DELIVERY_TIME"; setUserState(userId,state);
+      replyWithCustomerQuickReply(replyToken,"⏰ เวลาที่ต้องการรับเค้กคะ?",[{label:"10:00",text:"10:00"},{label:"12:00",text:"12:00"},{label:"14:00",text:"14:00"},{label:"16:00",text:"16:00"},{label:"18:00",text:"18:00"},{label:"ระบุเอง",text:"ระบุเวลา"}]);
+      return true;
+
+    case "DELIVERY_TIME":
+      if (text==="ระบุเวลา") {
+        replyWithCustomerQuickReply(replyToken,"⏰ พิมพ์เวลาที่ต้องการค่ะ (เช่น 15:30)",[{label:"❌ ยกเลิก",text:"ยกเลิกการสั่ง"}]);
+        return true;
+      }
+      state.deliveryTime=text; state.step="DELIVERY_TYPE"; setUserState(userId,state);
+      replyWithCustomerQuickReply(replyToken,"🚗 รับเค้กแบบไหนคะ?",QR_DELIVERY_TYPE);
+      return true;
+
+    case "DELIVERY_TYPE":
+      state.deliveryType=text;
+      if (text==="Delivery") {
+        state.step="LOCATION"; setUserState(userId,state);
+        replyWithCustomerQuickReply(replyToken,"📍 ส่งไปที่ไหนคะ?\nพิมพ์ที่อยู่ หรือส่ง Google Map link ได้เลยค่ะ",[{label:"❌ ยกเลิก",text:"ยกเลิกการสั่ง"}]);
+      } else {
+        state.step="NOTE"; state.location="รับเองที่ร้าน"; setUserState(userId,state);
+        replyWithCustomerQuickReply(replyToken,"📝 มีหมายเหตุเพิ่มเติมไหมคะ?\n(เช่น ข้อความบนเค้ก, แพ้อาหาร)",[{label:"ไม่มี",text:"ไม่มี"},{label:"❌ ยกเลิก",text:"ยกเลิกการสั่ง"}]);
+      }
+      return true;
+
+    case "LOCATION":
+      state.location=text;
+      if (/maps\.app\.goo\.gl|google\.com\/maps|goo\.gl\/maps/.test(text)) { state.googleMap=text; state.location="ดูแผนที่"; }
+      state.step="NOTE"; setUserState(userId,state);
+      replyWithCustomerQuickReply(replyToken,"📝 มีหมายเหตุเพิ่มเติมไหมคะ?\n(เช่น ข้อความบนเค้ก, แพ้อาหาร)",[{label:"ไม่มี",text:"ไม่มี"},{label:"❌ ยกเลิก",text:"ยกเลิกการสั่ง"}]);
+      return true;
+
+    case "NOTE":
+      state.note=(text==="ไม่มี")?"":text;
+      state.step="CONFIRM"; setUserState(userId,state);
+      var grandTotal = state.items.reduce(function(sum,item){return sum+item.itemTotal;},0);
+      var summary="🧾 สรุปออเดอร์\n\n";
+      summary+="👤 "+state.customerName+"\n📞 "+state.phone+"\n📅 "+state.deliveryDate+" ⏰ "+state.deliveryTime+"\n🚗 "+state.deliveryType+"\n";
+      if (state.location) summary+="📍 "+state.location+"\n";
+      summary+="\n📋 รายการ:\n";
+      state.items.forEach(function(item){ summary+="• "+item.menuName+" x"+item.quantity+" = "+item.itemTotal.toLocaleString()+"฿\n"; });
+      summary+="\n💰 รวม: "+grandTotal.toLocaleString()+" บาท";
+      if (state.note) summary+="\n📝 "+state.note;
+      summary+="\n\n✅ ยืนยันสั่งไหมคะ?";
+      replyWithCustomerQuickReply(replyToken,summary,[{label:"✅ ยืนยัน",text:"ยืนยันสั่ง"},{label:"✏️ แก้ไข",text:"แก้ไขออเดอร์"},{label:"❌ ยกเลิก",text:"ยกเลิกการสั่ง"}]);
+      return true;
+
+    case "CONFIRM":
+      if (text==="ยืนยันสั่ง"||text==="✅ ยืนยัน"||text==="ยืนยัน") {
+        var orderData = buildOrderDataFromState(state);
+        var orderId   = saveToSheet(orderData,"Guided Order via LINE");
+        saveCustomer(userId, state.customerName, state.phone);
+        clearUserState(userId);
+        replyFlexWithCustomerQR(replyToken, buildCustomerOrderConfirmFlex(orderData,orderId), QR_CUSTOMER_MAIN);
+        return true;
+      }
+      if (text==="แก้ไขออเดอร์"||text==="✏️ แก้ไข") { clearUserState(userId); startGuidedOrderFlow(replyToken,userId); return true; }
+      return false;
+
+    default:
+      clearUserState(userId); return false;
+  }
+}
+
+function buildOrderDataFromState(state) {
+  var grandTotal = state.items.reduce(function(sum,item){return sum+item.itemTotal;},0);
+  return {
+    orderId:      generateOrderId(),
+    deliveryDate: state.deliveryDate,
+    paymentDate:  getTodayTH(),
+    customerName: state.customerName,
+    phone:        state.phone,
+    channel:      "LINE",
+    orderType:    "Retail",
+    tableName:    state.customerName,
+    deliveryType: state.deliveryType||"",
+    deliveryTime: state.deliveryTime||"",
+    location:     state.location||"",
+    deliveryFee:  0,
+    grandTotal:   grandTotal,
+    note:         state.note||"",
+    googleMap:    state.googleMap||"",
+    paymentStatus:"Pending",
+    items:        state.items
+  };
+}
+
+// ============================================================
+//  USER STATE
+// ============================================================
+function getUserState(userId) {
+  try { var raw=PropertiesService.getScriptProperties().getProperty("state_"+userId); return raw?JSON.parse(raw):null; } catch(e){return null;}
+}
+function setUserState(userId, state) {
+  PropertiesService.getScriptProperties().setProperty("state_"+userId, JSON.stringify(state));
+}
+function clearUserState(userId) {
+  PropertiesService.getScriptProperties().deleteProperty("state_"+userId);
+}
+
+// ============================================================
+//  CUSTOMER DATABASE
+// ============================================================
+function getCustomerSheet() {
+  var ss    = SpreadsheetApp.openById(SPREADSHEET_ID);
+  var sheet = ss.getSheetByName(CUSTOMER_SHEET_NAME);
+  if (!sheet) {
+    sheet = ss.insertSheet(CUSTOMER_SHEET_NAME);
+    sheet.getRange(1,1,1,5).setValues([["User ID","Name","Phone","Last Order Date","Total Orders"]]);
+  }
+  return sheet;
+}
+
+function saveCustomer(userId, name, phone) {
+  var sheet = getCustomerSheet(), data = sheet.getDataRange().getValues(), today = getTodayTH();
+  for (var i=1; i<data.length; i++) {
+    if (data[i][0]===userId) {
+      sheet.getRange(i+1,2).setValue(name);
+      sheet.getRange(i+1,3).setValue(phone);
+      sheet.getRange(i+1,4).setValue(today);
+      sheet.getRange(i+1,5).setValue((data[i][4]||0)+1);
+      return;
+    }
+  }
+  sheet.appendRow([userId,name,phone,today,1]);
+}
+
+function getCustomerIdByName(name) {
+  var sheet = getCustomerSheet(), data = sheet.getDataRange().getValues();
+  for (var i=1; i<data.length; i++) {
+    if (String(data[i][1]).toLowerCase()===String(name).toLowerCase()) return data[i][0];
+  }
+  return null;
+}
+
+function getCustomerLatestOrders(userId, limit) {
+  var customerName = getCustomerNameById(userId);
+  if (!customerName) return [];
+  var rows = getOrderRows(function(r){ return r.customerName.toLowerCase()===customerName.toLowerCase(); });
+  var mainRows = rows.filter(function(r){ return r.grandTotal!=="" && r.grandTotal!==null && toNumber(r.grandTotal)>0; });
+  return groupRowsByOrder(mainRows.length>0?rows:rows).slice(-limit).reverse();
+}
+
+function getCustomerNameById(userId) {
+  var sheet = getCustomerSheet(), data = sheet.getDataRange().getValues();
+  for (var i=1; i<data.length; i++) { if (data[i][0]===userId) return data[i][1]; }
+  return null;
+}
+
+// ============================================================
+//  MENU DATABASE
+// ============================================================
+function getMenuSheet() {
+  var ss    = SpreadsheetApp.openById(SPREADSHEET_ID);
+  var sheet = ss.getSheetByName(MENU_SHEET_NAME);
+  if (!sheet) {
+    sheet = ss.insertSheet(MENU_SHEET_NAME);
+    sheet.getRange(1,1,1,7).setValues([["Menu ID","Menu Name","Price","Category","Image URL","Badge","Description"]]);
+    sheet.getRange(2,1,3,7).setValues([
+      ["CAKE001","มินิเค้กรวมรส",130,"มินิเค้ก","","ยอดนิยม","เค้กรวม 4 รส ไซส์จิ๋ว"],
+      ["CAKE002","เค้กสตรอว์เบอร์รี่",450,"เค้กก้อน","","แนะนำ","ครีมสดสตรอว์เบอร์รี่ 1 ปอนด์"],
+      ["CAKE003","บราวนี่ช็อกโกแลต",90,"ขนมอบ","","ใหม่","บราวนี่เข้มข้น หนึบนุ่ม"]
+    ]);
+  }
+  return sheet;
+}
+
+function getCakeMenuData() {
+  var sheet   = getMenuSheet(), data = sheet.getDataRange().getValues(), headers = data[0];
+  return data.slice(1).filter(function(row){return row[0];}).map(function(row){
+    return {
+      id:          row[headers.indexOf("Menu ID")],
+      name:        row[headers.indexOf("Menu Name")],
+      price:       toNumber(row[headers.indexOf("Price")]),
+      category:    row[headers.indexOf("Category")]||"",
+      imageUrl:    row[headers.indexOf("Image URL")]||"",
+      badge:       row[headers.indexOf("Badge")]||"",
+      description: row[headers.indexOf("Description")]||""
+    };
+  });
+}
+
+// ============================================================
+//  ORDER STATUS HELPERS
+// ============================================================
+function getOrderStatus(orderId) {
+  var sheet      = getSheet(), data = sheet.getDataRange().getValues(), headers = data[0];
+  var statusCol  = headers.indexOf("Status"), orderIdCol = headers.indexOf("Order ID");
+  if (statusCol<0||orderIdCol<0) return ORDER_STATUS.CONFIRMED;
+  for (var i=1; i<data.length; i++) {
+    if (String(data[i][orderIdCol]).toLowerCase()===String(orderId).toLowerCase())
+      return data[i][statusCol] || ORDER_STATUS.CONFIRMED;
+  }
+  return null;
+}
+function getOrderStatusFromRow(row) { return row.status || ORDER_STATUS.CONFIRMED; }
+function updateOrderStatus(orderId, newStatus) {
+  var sheet      = getSheet(), data = sheet.getDataRange().getValues(), headers = data[0];
+  var statusCol  = headers.indexOf("Status"), orderIdCol = headers.indexOf("Order ID");
+  if (statusCol<0||orderIdCol<0) return false;
+  for (var i=1; i<data.length; i++) {
+    if (String(data[i][orderIdCol]).toLowerCase()===String(orderId).toLowerCase())
+      sheet.getRange(i+1,statusCol+1).setValue(newStatus);
+  }
+  clearSheetCache(); return true;
+}
+
+// ============================================================
+//  STATUS UPDATE COMMAND (Admin)
+// ============================================================
+function handleStatusUpdateCommand(text, replyToken) {
+  var match = text.match(/^status\s+(\S+)\s+(\w+)$/i);
+  if (!match) return false;
+  var orderId   = match[1];
+  var statusKey = match[2].toUpperCase();
+  var statusMap = {
+    "PENDING":    ORDER_STATUS.PENDING,
+    "CONFIRMED":  ORDER_STATUS.CONFIRMED,
+    "PREPARING":  ORDER_STATUS.PREPARING,
+    "READY":      ORDER_STATUS.READY,
+    "DELIVERING": ORDER_STATUS.DELIVERING,
+    "COMPLETED":  ORDER_STATUS.COMPLETED
+  };
+  var newStatus = statusMap[statusKey];
+  if (!newStatus) {
+    replyLine(replyToken,"⚠️ สถานะไม่ถูกต้อง\nใช้: pending / confirmed / preparing / ready / delivering / completed");
+    return true;
+  }
+  updateOrderStatus(orderId, newStatus);
+  if (newStatus === ORDER_STATUS.READY) pushReadyNotification(orderId);
+  replyFlexWithQuickReply(replyToken, buildAlertFlex("✅ อัปเดตสถานะแล้ว", orderId+" → "+newStatus, "#4CAF50"), QR_MAIN);
+  return true;
+}
+
+// ============================================================
+//  ADMIN NOTIFICATION
+// ============================================================
+function notifyAdminCancelRequest(orderId, userId) {
+  var customerName = getCustomerNameById(userId) || "ไม่ทราบชื่อ";
+  ADMIN_USER_IDS.forEach(function(adminId) {
+    pushTextMessage(adminId,"⚠️ ลูกค้าขอยกเลิก\n\nOrder: "+orderId+"\nลูกค้า: "+customerName+"\n\nพิมพ์ 'cancel "+orderId+" confirm' เพื่อยกเลิก\nหรือติดต่อลูกค้าโดยตรง");
+  });
+}
+
+// ============================================================
+//  SETUP FUNCTIONS
+// ============================================================
+function setupV2Sheets() {
+  getMenuSheet();     Logger.log("Menu sheet ready");
+  getCustomerSheet(); Logger.log("Customers sheet ready");
+  var sheet   = getSheet();
+  var headers = sheet.getRange(1,1,1,sheet.getLastColumn()).getValues()[0];
+  if (headers.indexOf("Status") < 0) {
+    sheet.getRange(1, sheet.getLastColumn()+1).setValue("Status");
+    Logger.log("Added Status column");
+  }
+  Logger.log("✅ V2 setup complete!");
+}
+
+function setupV2Triggers() {
+  ScriptApp.getProjectTriggers().forEach(function(t) {
+    if (["pushPaymentReminders","pushPickupReminders","pushReviewRequests"].includes(t.getHandlerFunction()))
+      ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger("pushPaymentReminders").timeBased().everyHours(6).create();
+  ScriptApp.newTrigger("pushPickupReminders").timeBased().atHour(18).everyDays(1).create();
+  ScriptApp.newTrigger("pushReviewRequests").timeBased().atHour(10).everyDays(1).create();
+  Logger.log("✅ V2 triggers setup complete!");
+}
